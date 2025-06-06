@@ -2,37 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: Arial, Helvetica, sans-serif;
-}
-
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --background: 60 56% 91%; /* Light Beige #F5F5DC */
+    --foreground: 60 10% 25%; /* Dark Muted Brown for text on Beige */
+
+    --card: 60 50% 95%; /* Slightly Lighter Beige for Cards */
+    --card-foreground: 60 10% 25%;
+
+    --popover: 60 50% 95%;
+    --popover-foreground: 60 10% 25%;
+
+    --primary: 140 58% 24%; /* Forest Green #1A612D */
+    --primary-foreground: 140 50% 95%; /* Light color for text on Forest Green */
+
+    --secondary: 60 30% 85%; /* Lighter beige for secondary elements */
+    --secondary-foreground: 60 10% 25%;
+
+    --muted: 60 30% 80%;
+    --muted-foreground: 60 10% 45%;
+
+    --accent: 25 57% 38%; /* Earthy Brown #A0522D */
+    --accent-foreground: 25 50% 95%; /* Light color for text on Earthy Brown */
+
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+
+    --border: 60 20% 80%; /* Beige-toned border */
+    --input: 60 20% 80%;
+    --ring: 25 57% 38%; /* Earthy Brown for ring */
+
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
+    --radius: 0.5rem; /* Default from shadcn, can be adjusted for "natural curves" */
+
+    /* Sidebar variables, less critical for this app but keeping them for consistency */
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
     --sidebar-primary: 240 5.9% 10%;
@@ -42,31 +49,43 @@ body {
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
+
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    /* Define dark mode colors if needed, for now sticking to light mode as per design */
+    --background: 25 15% 10%; /* Dark Earthy Brown */
+    --foreground: 60 50% 90%; /* Light Beige text */
+
+    --card: 25 15% 15%;
+    --card-foreground: 60 50% 90%;
+
+    --popover: 25 15% 15%;
+    --popover-foreground: 60 50% 90%;
+
+    --primary: 140 50% 40%; /* Slightly lighter Forest Green */
+    --primary-foreground: 140 50% 95%;
+
+    --secondary: 25 15% 20%;
+    --secondary-foreground: 60 50% 90%;
+
+    --muted: 25 15% 25%;
+    --muted-foreground: 60 30% 70%;
+
+    --accent: 25 50% 55%; /* Lighter Earthy Brown */
+    --accent-foreground: 25 15% 95%;
+
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+
+    --border: 25 15% 25%;
+    --input: 25 15% 25%;
+    --ring: 25 50% 55%;
+
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;

@@ -1,3 +1,5 @@
-export default function Home() {
-  return <></>;
+import DaytraceClientPage from '@/components/DaytraceClientPage';
+
+export default function HomePage() {
+  return <DaytraceClientPage />;
 }
