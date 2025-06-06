@@ -1,8 +1,9 @@
+
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { RefreshCw, ArrowLeftRight, EraserIcon, Info, ListChecks, RadioTower } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { useForm, SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,13 +27,13 @@ type JumpFormValues = z.infer<typeof jumpSchema>;
 export function VoiceCommandPalette({ onRepeat, onClearAnswer, onJumpToQuestion, onSummary, isPaletteDisabled, maxQuestions }: VoiceCommandPaletteProps) {
   const { register, handleSubmit, formState: { errors }, setValue } = useForm<JumpFormValues>({
     resolver: zodResolver(jumpSchema.extend({
-      questionNumber: z.coerce.number().min(1, "Must be at least 1").max(maxQuestions, `Must be at most ${maxQuestions}`)
+      questionNumber: z.coerce.number().min(1, "Must be at least 1").max(maxQuestions > 0 ? maxQuestions : 1 , `Must be at most ${maxQuestions || 1}`)
     }))
   });
 
   const handleJumpSubmit: SubmitHandler<JumpFormValues> = (data) => {
     onJumpToQuestion(data.questionNumber);
-    setValue("questionNumber", "" as any); // Clear input after submit
+    setValue("questionNumber", "" as any); 
   };
   
   return (
@@ -40,14 +41,17 @@ export function VoiceCommandPalette({ onRepeat, onClearAnswer, onJumpToQuestion,
       <CardHeader>
         <CardTitle className="font-headline text-lg flex items-center gap-2">
           <RadioTower className="h-5 w-5 text-primary" />
-          Voice Command Palette (Simulated)
+          Controls
         </CardTitle>
+        <CardDescription className="text-sm text-muted-foreground">
+          Use these buttons to control the Q&A session. 
+          Voice commands (e.g., "Daytrace next") are not active as speech-to-text is now handled by an internal module.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">Use these buttons to simulate voice commands. (Wake word: "Daytrace")</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           <Button variant="ghost" onClick={onRepeat} disabled={isPaletteDisabled} className="justify-start">
-            <RefreshCw className="mr-2 h-4 w-4" /> Repeat
+            <RefreshCw className="mr-2 h-4 w-4" /> Repeat Question
           </Button>
           <Button variant="ghost" onClick={onClearAnswer} disabled={isPaletteDisabled} className="justify-start">
             <EraserIcon className="mr-2 h-4 w-4" /> Clear Answer
@@ -65,7 +69,7 @@ export function VoiceCommandPalette({ onRepeat, onClearAnswer, onJumpToQuestion,
               {...register("questionNumber")}
               placeholder="No."
               min="1"
-              max={maxQuestions}
+              max={maxQuestions > 0 ? maxQuestions : undefined}
               disabled={isPaletteDisabled || maxQuestions === 0}
               className="w-full mt-1"
             />
