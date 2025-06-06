@@ -32,6 +32,7 @@ export default function DaytraceClientPage() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [isQnAActive, setIsQnAActive] = useState(false);
+  const [justStartedQnA, setJustStartedQnA] = useState(false);
 
   const { toast } = useToast();
 
@@ -65,9 +66,10 @@ export default function DaytraceClientPage() {
       setIsTranscribing(true);
     } catch (e) {
       console.error("Error starting recognition:", e);
+      toast({ title: "STT Error", description: "Could not start voice recognition.", variant: "destructive"});
       setIsTranscribing(false); 
     }
-  }, [isTranscribing]);
+  }, [isTranscribing, toast]);
 
   const stopTranscription = useCallback(() => {
     if (recognitionRef.current && isTranscribing) {
@@ -213,7 +215,7 @@ export default function DaytraceClientPage() {
             throw new Error("Invalid JSON format. Expected an array of objects with a 'question' property.");
           }
           const questionsWithIds: Question[] = parsedInput.map((q, index) => ({
-            text: q.question, // Use q.question from imported JSON
+            text: q.question,
             id: q.id || `q-${Date.now()}-${index}`
           }));
           setQuestions(questionsWithIds);
@@ -239,7 +241,7 @@ export default function DaytraceClientPage() {
     const dataToExport = {
       questions: questions.map(q => ({
         id: q.id,
-        question: q.text, // Export with 'question' key
+        question: q.text,
         answer: questionStates[q.id]?.answer || '',
         status: questionStates[q.id]?.status || 'pending',
       })),
@@ -301,24 +303,28 @@ export default function DaytraceClientPage() {
 
   const handleStartQnA = () => {
     if (questions.length > 0) {
+      const firstQuestion = questions[0];
+      const firstQuestionId = firstQuestion.id;
+
+      setQuestionStates(prev => ({
+        ...prev,
+        [firstQuestionId]: {
+          ...(prev[firstQuestionId] || { answer: '' }),
+          status: 'pending',
+        },
+      }));
+      setCurrentQuestionIndex(0);
       setIsQnAActive(true);
-      const firstQuestionIndex = 0;
-      setCurrentQuestionIndex(firstQuestionIndex); 
-      
-      const firstQuestion = questions[firstQuestionIndex];
-      if (firstQuestion) {
-          const existingState = questionStates[firstQuestion.id];
-          setQuestionStates(prev => ({
-              ...prev,
-              [firstQuestion.id]: {
-                answer: existingState?.answer || '', 
-                status: 'pending', 
-              },
-          }));
-        readQuestionAndPotentiallyListen(firstQuestion.text);
-      }
+      setJustStartedQnA(true); 
     }
   };
+
+  useEffect(() => {
+    if (justStartedQnA && isQnAActive && currentQuestion && currentQuestionIndex === 0 && questions.length > 0) {
+      readQuestionAndPotentiallyListen(currentQuestion.text);
+      setJustStartedQnA(false); 
+    }
+  }, [justStartedQnA, isQnAActive, currentQuestion, currentQuestionIndex, questions, readQuestionAndPotentiallyListen]);
   
   useEffect(() => {
     return () => {
@@ -433,6 +439,7 @@ export default function DaytraceClientPage() {
                     <NavigationControls
                         onPrevious={handlePrevQuestion}
                         onNext={handleNextQuestion}
+                        onSkip={handleSkipQuestion}
                         canPrevious={currentQuestionIndex > 0}
                         canNext={questions.length > 0}
                     />
@@ -462,5 +469,7 @@ export default function DaytraceClientPage() {
     </div>
   );
 }
+
+    
 
     
