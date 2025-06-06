@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Question, QuestionInteractionState, AllQuestionStates } from '@/types';
+import type { Question, QuestionInteractionState, AllQuestionStates } from '@/types';
 import { AppHeader } from '@/components/Header';
 import { FileControls } from '@/components/FileControls';
 import { QuestionDisplay } from '@/components/QuestionDisplay';
@@ -13,15 +13,14 @@ import { VoiceCommandPalette } from '@/components/VoiceCommandPalette';
 import { ProgressIndicator } from '@/components/ProgressIndicator';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from './ui/card';
+import { Button } from './ui/button';
 
-// Mock SpeechRecognition and SpeechSynthesisUtterance for SSR and environments where they don't exist
 const SpeechRecognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
 const speechSynthesis = globalThis.speechSynthesis;
 
 interface ImportedQuestionFormat {
   id?: string;
   question: string;
-  // Allow other properties to be present but not used directly
   [key: string]: any;
 }
 
@@ -32,6 +31,7 @@ export default function DaytraceClientPage() {
   
   const [isTranscribing, setIsTranscribing] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const [isQnAActive, setIsQnAActive] = useState(false);
 
   const { toast } = useToast();
 
@@ -45,6 +45,166 @@ export default function DaytraceClientPage() {
     });
     setQuestionStates(initialStates);
   }, []);
+  
+  const updateCurrentQuestionState = useCallback((updates: Partial<QuestionInteractionState>) => {
+    if (currentQuestion) {
+      setQuestionStates(prev => ({
+        ...prev,
+        [currentQuestion.id]: {
+          ...(prev[currentQuestion.id] || { answer: '', status: 'pending' }),
+          ...updates,
+        },
+      }));
+    }
+  }, [currentQuestion]);
+
+  const actuallyStartTranscription = useCallback(() => {
+    if (!recognitionRef.current || isTranscribing) return;
+    try {
+      recognitionRef.current.start();
+      setIsTranscribing(true);
+    } catch (e) {
+      console.error("Error starting recognition:", e);
+      setIsTranscribing(false); 
+    }
+  }, [isTranscribing]);
+
+  const stopTranscription = useCallback(() => {
+    if (recognitionRef.current && isTranscribing) {
+      recognitionRef.current.stop();
+    }
+  }, [isTranscribing]);
+  
+  const readQuestionAndPotentiallyListen = useCallback((questionText: string) => {
+    if (!speechSynthesis || !questionText) {
+      if (isQnAActive && SpeechRecognition) {
+         actuallyStartTranscription();
+      }
+      return;
+    }
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(questionText);
+    utterance.onend = () => {
+      if (isQnAActive && SpeechRecognition) {
+        actuallyStartTranscription();
+      }
+    };
+    utterance.onerror = (event) => {
+      console.error("Speech synthesis error", event);
+      toast({ title: "Error", description: "Failed to read question aloud.", variant: "destructive" });
+      if (isQnAActive && SpeechRecognition) {
+          actuallyStartTranscription();
+      }
+    };
+    speechSynthesis.speak(utterance);
+  }, [isQnAActive, toast, actuallyStartTranscription]);
+
+  const navigate = useCallback((direction: 'next' | 'prev' | 'skip' | 'jump', targetIndex?: number) => {
+    if (questions.length === 0 || !isQnAActive) return;
+
+    speechSynthesis?.cancel();
+    stopTranscription();
+
+    let newIndex = currentQuestionIndex;
+    const oldIndex = currentQuestionIndex;
+
+    const currentQ = questions[oldIndex];
+    const currentQStateInteraction = currentQ ? questionStates[currentQ.id] : undefined;
+
+    if (currentQ && currentQStateInteraction) {
+      if (currentQStateInteraction.status === 'pending') {
+        if (currentQStateInteraction.answer.trim() !== '') {
+          setQuestionStates(prev => ({ ...prev, [currentQ.id]: { ...currentQStateInteraction, status: 'answered' } }));
+        } else if (direction === 'skip') {
+          setQuestionStates(prev => ({ ...prev, [currentQ.id]: { ...currentQStateInteraction, status: 'skipped' } }));
+        }
+      }
+    }
+
+    if (direction === 'next' || direction === 'skip') {
+      newIndex = Math.min(questions.length - 1, currentQuestionIndex + 1);
+    } else if (direction === 'prev') {
+      newIndex = Math.max(0, currentQuestionIndex - 1);
+    } else if (direction === 'jump' && targetIndex !== undefined) {
+      newIndex = Math.max(0, Math.min(questions.length - 1, targetIndex));
+    }
+    
+    if (newIndex !== oldIndex) {
+       setCurrentQuestionIndex(newIndex);
+       if (questions[newIndex]) {
+          readQuestionAndPotentiallyListen(questions[newIndex].text);
+       }
+    } else if ((direction === 'next' || direction === 'skip') && currentQuestionIndex === questions.length - 1 && oldIndex === currentQuestionIndex) {
+       toast({ title: "End of questions", description: "You've reached the last question."});
+       if (questions[newIndex]) { // Re-read last question and listen
+          readQuestionAndPotentiallyListen(questions[newIndex].text);
+       }
+    } else if (direction === 'next' || direction === 'skip') { // If on last question and "next" or "skip" is pressed, re-read and listen
+        if (questions[newIndex]) {
+            readQuestionAndPotentiallyListen(questions[newIndex].text);
+        }
+    }
+  }, [questions, currentQuestionIndex, questionStates, isQnAActive, readQuestionAndPotentiallyListen, stopTranscription, toast]);
+
+
+  const handleRecognitionResult = useCallback((event: SpeechRecognitionEvent) => {
+    let finalTranscriptPart = '';
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscriptPart += event.results[i][0].transcript;
+      }
+    }
+    const processedFinalTranscript = finalTranscriptPart.trim().toLowerCase();
+
+    if (processedFinalTranscript.startsWith("daytrace next")) {
+      if (isQnAActive) {
+          toast({ title: "Voice Command", description: "Navigating to next question." });
+          if (recognitionRef.current && isTranscribing) {
+              stopTranscription();
+          }
+          navigate('next');
+      }
+    } else if (finalTranscriptPart.trim()) {
+      updateCurrentQuestionState({ answer: (currentQuestionState?.answer || '') + finalTranscriptPart });
+    }
+  }, [isQnAActive, isTranscribing, navigate, updateCurrentQuestionState, currentQuestionState, toast, stopTranscription]);
+
+
+  useEffect(() => {
+    if (SpeechRecognition && !recognitionRef.current) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognitionRef.current = recognition;
+    }
+
+    if (recognitionRef.current) {
+      recognitionRef.current.onresult = handleRecognitionResult;
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error', event.error);
+        toast({ title: "Error", description: `Speech recognition error: ${event.error}`, variant: "destructive" });
+        setIsTranscribing(false);
+      };
+      recognitionRef.current.onend = () => {
+        // Check if Q&A is active before deciding to restart.
+        // If Q&A is active and it wasn't a manual stop, or a command that stops it.
+        // For now, we are stopping transcription on 'next' command, so this should be okay.
+        // If it ends unexpectedly, we might want to restart it only if isQnAActive is true.
+        // However, setting isTranscribing to false is generally safe.
+        setIsTranscribing(false);
+      };
+    }
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      }
+      speechSynthesis?.cancel();
+    };
+  }, [handleRecognitionResult, toast]);
+
 
   const handleImportJson = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -58,12 +218,13 @@ export default function DaytraceClientPage() {
             throw new Error("Invalid JSON format. Expected an array of objects with a 'question' property.");
           }
           const questionsWithIds: Question[] = parsedInput.map((q, index) => ({
-            text: q.question, // Map 'question' to 'text'
+            text: q.question,
             id: q.id || `q-${Date.now()}-${index}`
           }));
           setQuestions(questionsWithIds);
           setCurrentQuestionIndex(0);
           initQuestionStates(questionsWithIds);
+          setIsQnAActive(false); 
           toast({ title: "Success", description: "Questions imported successfully." });
         } catch (error) {
           console.error("Failed to parse JSON:", error);
@@ -72,7 +233,7 @@ export default function DaytraceClientPage() {
       };
       reader.readAsText(file);
     }
-    event.target.value = ''; // Reset file input
+    event.target.value = '';
   };
 
   const handleExportJson = () => {
@@ -83,7 +244,7 @@ export default function DaytraceClientPage() {
     const dataToExport = {
       questions: questions.map(q => ({
         id: q.id,
-        question: q.text, // Map internal 'text' back to 'question' for export
+        question: q.text, // Use 'question' key for export
         answer: questionStates[q.id]?.answer || '',
         status: questionStates[q.id]?.status || 'pending',
       })),
@@ -101,18 +262,6 @@ export default function DaytraceClientPage() {
     toast({ title: "Success", description: "Data exported successfully." });
   };
   
-  const updateCurrentQuestionState = useCallback((updates: Partial<QuestionInteractionState>) => {
-    if (currentQuestion) {
-      setQuestionStates(prev => ({
-        ...prev,
-        [currentQuestion.id]: {
-          ...(prev[currentQuestion.id] || { answer: '', status: 'pending' }),
-          ...updates,
-        },
-      }));
-    }
-  }, [currentQuestion]);
-
   const handleAnswerChange = (answer: string) => {
     updateCurrentQuestionState({ answer });
   };
@@ -121,103 +270,58 @@ export default function DaytraceClientPage() {
     updateCurrentQuestionState({ answer: '' });
   };
 
-  const navigate = (direction: 'next' | 'prev' | 'skip' | 'jump', targetIndex?: number) => {
-    if (questions.length === 0) return;
-
-    let newIndex = currentQuestionIndex;
-    if (direction === 'next' || direction === 'skip') {
-      if (currentQuestion && currentQuestionState?.status === 'pending' && currentQuestionState.answer.trim() !== '') {
-         updateCurrentQuestionState({ status: 'answered' });
-      } else if (direction === 'skip' && currentQuestionState?.status === 'pending') {
-         updateCurrentQuestionState({ status: 'skipped' });
-      }
-      newIndex = Math.min(questions.length - 1, currentQuestionIndex + 1);
-    } else if (direction === 'prev') {
-      newIndex = Math.max(0, currentQuestionIndex - 1);
-    } else if (direction === 'jump' && targetIndex !== undefined) {
-      newIndex = Math.max(0, Math.min(questions.length - 1, targetIndex));
-    }
-    
-    if (newIndex !== currentQuestionIndex && currentQuestionIndex < questions.length) {
-       setCurrentQuestionIndex(newIndex);
-    } else if ((direction === 'next' || direction === 'skip') && currentQuestionIndex === questions.length - 1) {
-       toast({ title: "End of questions", description: "You've reached the last question."});
-    }
-  };
-
   const handleNextQuestion = () => navigate('next');
   const handlePrevQuestion = () => navigate('prev');
   const handleSkipQuestion = () => navigate('skip');
   const handleJumpToQuestion = (questionNumber: number) => navigate('jump', questionNumber - 1);
 
   const handleReadAloud = () => {
-    if (!currentQuestion || !speechSynthesis) {
-      toast({ title: "Info", description: "No question to read or TTS not supported." });
+    if (!currentQuestion || !isQnAActive) {
+      toast({ title: "Info", description: "No question to read or Q&A not active." });
       return;
     }
-    speechSynthesis.cancel(); // Cancel any ongoing speech
-    const utterance = new SpeechSynthesisUtterance(currentQuestion.text);
-    // Potentially configure voice, rate, pitch here
-    speechSynthesis.speak(utterance);
+    stopTranscription(); 
+    readQuestionAndPotentiallyListen(currentQuestion.text);
   };
 
   const handleToggleTranscription = () => {
-    if (!SpeechRecognition) {
-      toast({ title: "Error", description: "Speech recognition not supported in this browser.", variant: "destructive" });
+    if (!SpeechRecognition || !isQnAActive) {
+      toast({ title: "Error", description: "Speech recognition not supported or Q&A not active.", variant: "destructive" });
       return;
     }
-
     if (isTranscribing) {
-      recognitionRef.current?.stop();
-      setIsTranscribing(false);
+      stopTranscription();
     } else {
-      recognitionRef.current = new SpeechRecognition();
-      const recognition = recognitionRef.current;
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      // recognition.lang = 'en-US'; // Optional: set language
+      actuallyStartTranscription();
+    }
+  };
 
-      recognition.onresult = (event) => {
-        let interimTranscript = '';
-        let finalTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
-        }
-        // Update with final transcript, potentially append
-        if (finalTranscript) {
-          // Append to existing answer or replace, based on preference
-          updateCurrentQuestionState({ answer: (currentQuestionState?.answer || '') + finalTranscript });
-        } else if (interimTranscript) {
-          // Optionally show interim results - for now, only updating on final
-        }
-      };
-
-      recognition.onerror = (event) => {
-        console.error('Speech recognition error', event.error);
-        toast({ title: "Error", description: `Speech recognition error: ${event.error}`, variant: "destructive" });
-        setIsTranscribing(false);
-      };
-      
-      recognition.onend = () => {
-        // If it ended unexpectedly and we still want to transcribe, restart it.
-        // For now, just set state to false. User can re-enable.
-        setIsTranscribing(false);
-      };
-
-      recognition.start();
-      setIsTranscribing(true);
+  const handleStartQnA = () => {
+    if (questions.length > 0) {
+      setIsQnAActive(true);
+      setCurrentQuestionIndex(0); // Always start from the first question
+      if (questions[0]) {
+          // Ensure the first question's state is pending if it was previously answered/skipped
+          setQuestionStates(prev => ({
+              ...prev,
+              [questions[0].id]: {
+                answer: prev[questions[0].id]?.answer || '', // Keep existing answer if any
+                status: 'pending', // Reset status to pending
+              },
+          }));
+        readQuestionAndPotentiallyListen(questions[0].text);
+      }
     }
   };
   
-  // Clean up SpeechRecognition on unmount
   useEffect(() => {
     return () => {
-      recognitionRef.current?.stop();
-      speechSynthesis?.cancel();
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      if (speechSynthesis) {
+        speechSynthesis.cancel();
+      }
     };
   }, []);
 
@@ -232,8 +336,10 @@ export default function DaytraceClientPage() {
     let summary = `You have answered ${answeredCount} out of ${questions.length} questions. `;
     if (skippedCount > 0) {
       summary += `${skippedCount} questions were skipped: ${skippedQuestionTexts}.`;
-    } else {
+    } else if (questions.length > 0) {
       summary += "No questions were skipped.";
+    } else {
+      summary = "No questions loaded to summarize."
     }
     return { summaryText: summary, answeredCount, skippedCount };
   };
@@ -253,8 +359,7 @@ export default function DaytraceClientPage() {
   };
   
   const { answeredCount, skippedCount } = getProgressSummary();
-  const isAudioDisabled = questions.length === 0;
-  const isPaletteDisabled = questions.length === 0;
+  const audioAndPaletteDisabled = !isQnAActive || questions.length === 0;
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -267,48 +372,74 @@ export default function DaytraceClientPage() {
                     onExport={handleExportJson}
                     isExportDisabled={questions.length === 0}
                 />
+                 {questions.length > 0 && !isQnAActive && (
+                    <Button onClick={handleStartQnA} className="w-full mt-4 bg-primary text-primary-foreground hover:bg-primary/90">
+                        Start Q&A
+                    </Button>
+                )}
             </CardContent>
         </Card>
 
-        <ProgressIndicator
-          current={questions.length > 0 ? currentQuestionIndex + 1 : 0}
-          total={questions.length}
-          answered={answeredCount}
-          skipped={skippedCount}
-        />
+        {questions.length === 0 && (
+            <Card className="min-h-[150px] flex items-center justify-center">
+                <CardContent className="p-6 text-center">
+                    <p className="text-lg text-muted-foreground">
+                        Import questions to start.
+                    </p>
+                </CardContent>
+            </Card>
+        )}
 
-        <QuestionDisplay
-          question={currentQuestion}
-          currentQuestionNumber={questions.length > 0 ? currentQuestionIndex + 1 : 0}
-          totalQuestions={questions.length}
-        />
-
-        <AnswerArea
-          answer={currentQuestionState?.answer || ''}
-          onAnswerChange={handleAnswerChange}
-          onClearAnswer={handleClearAnswer}
-          isReadOnly={questions.length === 0}
-        />
+        {!isQnAActive && questions.length > 0 && (
+             <Card className="min-h-[150px] flex items-center justify-center">
+                <CardContent className="p-6 text-center">
+                    <p className="text-lg text-muted-foreground">
+                        Press "Start Q&A" above to begin.
+                    </p>
+                </CardContent>
+            </Card>
+        )}
         
-        {questions.length > 0 && (
-          <Card>
-            <CardContent className="p-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-                <NavigationControls
-                    onPrevious={handlePrevQuestion}
-                    onNext={handleNextQuestion}
-                    onSkip={handleSkipQuestion}
-                    canPrevious={currentQuestionIndex > 0}
-                    canNext={currentQuestionIndex < questions.length} 
-                    isCurrentQuestionAnswered={currentQuestionState?.status === 'answered' || currentQuestionState?.status === 'skipped'}
-                />
-                <AudioControls
-                    onReadAloud={handleReadAloud}
-                    onToggleTranscription={handleToggleTranscription}
-                    isTranscribing={isTranscribing}
-                    isAudioDisabled={isAudioDisabled}
-                />
-            </CardContent>
-          </Card>
+        {isQnAActive && questions.length > 0 && currentQuestion && (
+          <>
+            <ProgressIndicator
+              current={currentQuestionIndex + 1}
+              total={questions.length}
+              answered={answeredCount}
+              skipped={skippedCount}
+            />
+
+            <QuestionDisplay
+              question={currentQuestion}
+              currentQuestionNumber={currentQuestionIndex + 1}
+              totalQuestions={questions.length}
+            />
+
+            <AnswerArea
+              answer={currentQuestionState?.answer || ''}
+              onAnswerChange={handleAnswerChange}
+              onClearAnswer={handleClearAnswer}
+              isReadOnly={false} 
+            />
+            
+            <Card>
+                <CardContent className="p-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <NavigationControls
+                        onPrevious={handlePrevQuestion}
+                        onNext={handleNextQuestion}
+                        onSkip={handleSkipQuestion}
+                        canPrevious={currentQuestionIndex > 0}
+                        canNext={questions.length > 0 && currentQuestionIndex < questions.length} // Adjusted to allow next on last question
+                    />
+                    <AudioControls
+                        onReadAloud={handleReadAloud}
+                        onToggleTranscription={handleToggleTranscription}
+                        isTranscribing={isTranscribing}
+                        isAudioDisabled={audioAndPaletteDisabled}
+                    />
+                </CardContent>
+            </Card>
+          </>
         )}
 
         <VoiceCommandPalette
@@ -316,7 +447,7 @@ export default function DaytraceClientPage() {
           onClearAnswer={handleClearAnswer}
           onJumpToQuestion={handleJumpToQuestion}
           onSummary={handleShowSummary}
-          isPaletteDisabled={isPaletteDisabled}
+          isPaletteDisabled={audioAndPaletteDisabled}
           maxQuestions={questions.length}
         />
       </main>
