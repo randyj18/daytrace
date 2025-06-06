@@ -99,6 +99,7 @@ export default function DaytraceClientPage() {
     speechSynthesis.speak(utterance);
   }, [isQnAActive, toast, actuallyStartTranscription]);
 
+
   const navigate = useCallback((direction: 'next' | 'prev' | 'skip' | 'jump', targetIndex?: number) => {
     if (questions.length === 0 || !isQnAActive) return;
 
@@ -136,16 +137,15 @@ export default function DaytraceClientPage() {
        }
     } else if ((direction === 'next' || direction === 'skip') && currentQuestionIndex === questions.length - 1 && oldIndex === currentQuestionIndex) {
        toast({ title: "End of questions", description: "You've reached the last question."});
-       if (questions[newIndex]) { // Re-read last question and listen
+       if (questions[newIndex]) { 
           readQuestionAndPotentiallyListen(questions[newIndex].text);
        }
-    } else if (direction === 'next' || direction === 'skip') { // If on last question and "next" or "skip" is pressed, re-read and listen
+    } else if (direction === 'next' || direction === 'skip') { 
         if (questions[newIndex]) {
             readQuestionAndPotentiallyListen(questions[newIndex].text);
         }
     }
   }, [questions, currentQuestionIndex, questionStates, isQnAActive, readQuestionAndPotentiallyListen, stopTranscription, toast]);
-
 
   const handleRecognitionResult = useCallback((event: SpeechRecognitionEvent) => {
     let finalTranscriptPart = '';
@@ -186,11 +186,6 @@ export default function DaytraceClientPage() {
         setIsTranscribing(false);
       };
       recognitionRef.current.onend = () => {
-        // Check if Q&A is active before deciding to restart.
-        // If Q&A is active and it wasn't a manual stop, or a command that stops it.
-        // For now, we are stopping transcription on 'next' command, so this should be okay.
-        // If it ends unexpectedly, we might want to restart it only if isQnAActive is true.
-        // However, setting isTranscribing to false is generally safe.
         setIsTranscribing(false);
       };
     }
@@ -218,7 +213,7 @@ export default function DaytraceClientPage() {
             throw new Error("Invalid JSON format. Expected an array of objects with a 'question' property.");
           }
           const questionsWithIds: Question[] = parsedInput.map((q, index) => ({
-            text: q.question,
+            text: q.question, // Use q.question from imported JSON
             id: q.id || `q-${Date.now()}-${index}`
           }));
           setQuestions(questionsWithIds);
@@ -244,7 +239,7 @@ export default function DaytraceClientPage() {
     const dataToExport = {
       questions: questions.map(q => ({
         id: q.id,
-        question: q.text, // Use 'question' key for export
+        question: q.text, // Export with 'question' key
         answer: questionStates[q.id]?.answer || '',
         status: questionStates[q.id]?.status || 'pending',
       })),
@@ -264,6 +259,9 @@ export default function DaytraceClientPage() {
   
   const handleAnswerChange = (answer: string) => {
     updateCurrentQuestionState({ answer });
+    if (currentQuestion && questionStates[currentQuestion.id]?.status === 'pending' && answer.trim() !== '') {
+        updateCurrentQuestionState({ status: 'answered' });
+    }
   };
 
   const handleClearAnswer = () => {
@@ -272,7 +270,12 @@ export default function DaytraceClientPage() {
 
   const handleNextQuestion = () => navigate('next');
   const handlePrevQuestion = () => navigate('prev');
-  const handleSkipQuestion = () => navigate('skip');
+  const handleSkipQuestion = () => {
+    if (currentQuestion && (questionStates[currentQuestion.id]?.answer || '').trim() === '') {
+        updateCurrentQuestionState({ status: 'skipped' });
+    }
+    navigate('skip');
+  };
   const handleJumpToQuestion = (questionNumber: number) => navigate('jump', questionNumber - 1);
 
   const handleReadAloud = () => {
@@ -299,17 +302,20 @@ export default function DaytraceClientPage() {
   const handleStartQnA = () => {
     if (questions.length > 0) {
       setIsQnAActive(true);
-      setCurrentQuestionIndex(0); // Always start from the first question
-      if (questions[0]) {
-          // Ensure the first question's state is pending if it was previously answered/skipped
+      const firstQuestionIndex = 0;
+      setCurrentQuestionIndex(firstQuestionIndex); 
+      
+      const firstQuestion = questions[firstQuestionIndex];
+      if (firstQuestion) {
+          const existingState = questionStates[firstQuestion.id];
           setQuestionStates(prev => ({
               ...prev,
-              [questions[0].id]: {
-                answer: prev[questions[0].id]?.answer || '', // Keep existing answer if any
-                status: 'pending', // Reset status to pending
+              [firstQuestion.id]: {
+                answer: existingState?.answer || '', 
+                status: 'pending', 
               },
           }));
-        readQuestionAndPotentiallyListen(questions[0].text);
+        readQuestionAndPotentiallyListen(firstQuestion.text);
       }
     }
   };
@@ -427,9 +433,8 @@ export default function DaytraceClientPage() {
                     <NavigationControls
                         onPrevious={handlePrevQuestion}
                         onNext={handleNextQuestion}
-                        onSkip={handleSkipQuestion}
                         canPrevious={currentQuestionIndex > 0}
-                        canNext={questions.length > 0 && currentQuestionIndex < questions.length} // Adjusted to allow next on last question
+                        canNext={questions.length > 0}
                     />
                     <AudioControls
                         onReadAloud={handleReadAloud}
@@ -457,3 +462,5 @@ export default function DaytraceClientPage() {
     </div>
   );
 }
+
+    
