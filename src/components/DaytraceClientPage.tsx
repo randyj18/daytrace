@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -16,6 +17,13 @@ import { Card, CardContent } from './ui/card';
 // Mock SpeechRecognition and SpeechSynthesisUtterance for SSR and environments where they don't exist
 const SpeechRecognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
 const speechSynthesis = globalThis.speechSynthesis;
+
+interface ImportedQuestionFormat {
+  id?: string;
+  question: string;
+  // Allow other properties to be present but not used directly
+  [key: string]: any;
+}
 
 export default function DaytraceClientPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -45,11 +53,14 @@ export default function DaytraceClientPage() {
       reader.onload = (e) => {
         try {
           const content = e.target?.result as string;
-          const parsedQuestions: Question[] = JSON.parse(content);
-          if (!Array.isArray(parsedQuestions) || !parsedQuestions.every(q => typeof q.text === 'string')) {
-            throw new Error("Invalid JSON format. Expected an array of objects with a 'text' property.");
+          const parsedInput: ImportedQuestionFormat[] = JSON.parse(content);
+          if (!Array.isArray(parsedInput) || !parsedInput.every(q => typeof q.question === 'string')) {
+            throw new Error("Invalid JSON format. Expected an array of objects with a 'question' property.");
           }
-          const questionsWithIds = parsedQuestions.map((q, index) => ({ ...q, id: q.id || `q-${Date.now()}-${index}`}));
+          const questionsWithIds: Question[] = parsedInput.map((q, index) => ({
+            text: q.question, // Map 'question' to 'text'
+            id: q.id || `q-${Date.now()}-${index}`
+          }));
           setQuestions(questionsWithIds);
           setCurrentQuestionIndex(0);
           initQuestionStates(questionsWithIds);
@@ -72,7 +83,7 @@ export default function DaytraceClientPage() {
     const dataToExport = {
       questions: questions.map(q => ({
         id: q.id,
-        text: q.text,
+        question: q.text, // Map internal 'text' back to 'question' for export
         answer: questionStates[q.id]?.answer || '',
         status: questionStates[q.id]?.status || 'pending',
       })),
