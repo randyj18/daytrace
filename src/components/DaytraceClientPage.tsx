@@ -463,13 +463,20 @@ export default function DaytraceClientPage() {
           maxQuestions={questions.length}
         />
       </main>
-      <footer className="text-center py-4 text-sm text-muted-foreground border-t">
-        Daytrace &copy; {new Date().getFullYear()}
+      <footer className="text-center py-4 text-sm text-muted-foreground border-t space-y-2">
+        <p>Daytrace &copy; {new Date().getFullYear()}</p>
+        <p>
+          Enjoying Daytrace?{' '}
+          <a
+            href="https://ko-fi.com/randyj18"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            Support development ☕
+          </a>
+        </p>
       </footer>
     </div>
   );
 }
-
-    
-
-    
