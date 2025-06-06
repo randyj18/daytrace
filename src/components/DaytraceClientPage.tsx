@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -9,13 +8,15 @@ import { QuestionDisplay } from '@/components/QuestionDisplay';
 import { AnswerArea } from '@/components/AnswerArea';
 import { NavigationControls } from '@/components/NavigationControls';
 import { AudioControls } from '@/components/AudioControls';
-import { VoiceCommandPalette } from '@/components/VoiceCommandPalette'; // This will become mostly non-functional for voice commands
+import { VoiceCommandPalette } from '@/components/VoiceCommandPalette';
 import { ProgressIndicator } from '@/components/ProgressIndicator';
+import { SessionManager } from '@/components/SessionManager';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
+import { SimpleSpeechRecognition } from '@/lib/simple-speech';
+import { SessionStorage, type SavedSession } from '@/lib/storage';
 
-// const SpeechRecognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition; // Removed, will use whisper.cpp
 const speechSynthesis = globalThis.speechSynthesis;
 
 interface ImportedQuestionFormat {
@@ -29,16 +30,16 @@ export default function DaytraceClientPage() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questionStates, setQuestionStates] = useState<AllQuestionStates>({});
   
-  const [isTranscribing, setIsTranscribing] = useState(false); // Will represent whisper.cpp transcribing state
-  // const recognitionRef = useRef<SpeechRecognition | null>(null); // Removed
-  const whisperModuleRef = useRef<any>(null); // For whisper.cpp Wasm module
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const audioProcessorNodeRef = useRef<ScriptProcessorNode | AudioWorkletNode | null>(null);
-
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const speechRecognitionRef = useRef<SimpleSpeechRecognition | null>(null);
+  const [isSpeechReady, setIsSpeechReady] = useState(false);
 
   const [isQnAActive, setIsQnAActive] = useState(false);
   const [justStartedQnA, setJustStartedQnA] = useState(false);
+  const readingQuestionRef = useRef(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [pauseDuration, setPauseDuration] = useState<number>(3); // Default 3 seconds
 
   const { toast } = useToast();
 
@@ -55,129 +56,92 @@ export default function DaytraceClientPage() {
   
   const updateCurrentQuestionState = useCallback((updates: Partial<QuestionInteractionState>) => {
     if (currentQuestion) {
-      setQuestionStates(prev => ({
-        ...prev,
-        [currentQuestion.id]: {
-          ...(prev[currentQuestion.id] || { answer: '', status: 'pending' }),
-          ...updates,
-        },
-      }));
+      setQuestionStates(prev => {
+        const newStates = {
+          ...prev,
+          [currentQuestion.id]: {
+            ...(prev[currentQuestion.id] || { answer: '', status: 'pending' }),
+            ...updates,
+          },
+        };
+        
+        // Auto-save to localStorage whenever state changes
+        if (questions.length > 0) {
+          const sessionId = SessionStorage.saveCurrentSession(
+            questions,
+            newStates,
+            currentQuestionIndex,
+            isQnAActive,
+            currentSessionId || undefined
+          );
+          if (sessionId && sessionId !== currentSessionId) {
+            setCurrentSessionId(sessionId);
+          }
+        }
+        
+        return newStates;
+      });
     }
-  }, [currentQuestion]);
+  }, [currentQuestion, questions, currentQuestionIndex, isQnAActive, currentSessionId]);
 
-  // Placeholder for loading whisper.cpp Wasm module and model
   useEffect(() => {
-    const loadWhisper = async () => {
-      // TODO: Implement whisper.cpp Wasm loading
-      // Example:
-      // try {
-      //   const module = await import('path/to/your/whisper.wasm');
-      //   const model = await fetch('/models/ggml-base.en.bin').then(res => res.arrayBuffer());
-      //   // Initialize whisper.cpp instance
-      //   // whisperModuleRef.current = new module.WhisperInstance(model); // This is hypothetical
-      //   toast({ title: "STT Ready", description: "Speech-to-text module loaded."});
-      // } catch (error) {
-      //   console.error("Failed to load whisper.cpp module:", error);
-      //   toast({ title: "STT Error", description: "Could not load speech-to-text module.", variant: "destructive"});
-      // }
-      console.log("Placeholder: Load whisper.cpp Wasm module here.");
+    const initSpeech = () => {
+      speechRecognitionRef.current = new SimpleSpeechRecognition();
+      
+      if (speechRecognitionRef.current.isAvailable()) {
+        setIsSpeechReady(true);
+        toast({ title: "STT Ready", description: "Speech recognition available and ready to use."});
+      } else {
+        setIsSpeechReady(false);
+        toast({ title: "STT Not Available", description: "Speech recognition not supported in this browser. Please use Chrome/Edge.", variant: "destructive"});
+      }
     };
-    loadWhisper();
+    
+    const loadSavedSession = () => {
+      const savedSession = SessionStorage.getCurrentSession();
+      const allSessions = SessionStorage.getAllSessions();
+      setSavedSessions(allSessions);
+      
+      // Load pause duration from localStorage
+      const savedPauseDuration = localStorage.getItem('daytrace_pause_duration');
+      if (savedPauseDuration) {
+        const duration = parseInt(savedPauseDuration, 10);
+        if (duration >= 0 && duration <= 60) {
+          setPauseDuration(duration);
+        }
+      }
+      
+      if (savedSession && savedSession.questions.length > 0) {
+        console.log('Restoring saved session:', savedSession.id);
+        setQuestions(savedSession.questions);
+        setQuestionStates(savedSession.questionStates);
+        setCurrentQuestionIndex(savedSession.currentQuestionIndex);
+        setIsQnAActive(savedSession.isQnAActive);
+        setCurrentSessionId(savedSession.id);
+        
+        toast({ 
+          title: "Session Restored", 
+          description: `Restored session with ${savedSession.questions.length} questions from ${new Date(savedSession.timestamp).toLocaleString()}`
+        });
+      }
+    };
+    
+    initSpeech();
+    loadSavedSession();
   }, [toast]);
 
-
   const stopTranscription = useCallback(() => {
-    // TODO: Implement whisper.cpp transcription stop
-    if (isTranscribing) {
+    if (isTranscribing && speechRecognitionRef.current) {
+      speechRecognitionRef.current.stopListening();
       setIsTranscribing(false);
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-        audioStreamRef.current = null;
-      }
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
-      if (audioProcessorNodeRef.current) {
-        audioProcessorNodeRef.current.disconnect();
-        audioProcessorNodeRef.current = null;
-      }
-      console.log("Placeholder: Whisper.cpp transcription stopped.");
     }
   }, [isTranscribing]);
-
-  const actuallyStartTranscription = useCallback(async () => {
-    // TODO: Implement whisper.cpp transcription start
-    // This will involve:
-    // 1. Getting microphone access (navigator.mediaDevices.getUserMedia)
-    // 2. Setting up AudioContext and ScriptProcessorNode/AudioWorkletNode for audio processing
-    // 3. Converting audio chunks to the format whisper.cpp expects (e.g., PCM 16kHz mono)
-    // 4. Passing audio data to the whisper.cpp Wasm module
-    // 5. Receiving transcribed text and updating the answer
-    if (!whisperModuleRef.current) {
-      toast({ title: "STT Not Ready", description: "Speech-to-text module not loaded.", variant: "destructive" });
-      return;
-    }
-    if (isTranscribing) return;
-
-    try {
-      setIsTranscribing(true);
-      toast({ title: "Listening...", description: "Speech-to-text active." });
-      console.log("Placeholder: Whisper.cpp transcription started. Implement audio capture and processing.");
-
-      // Example conceptual audio capture setup:
-      // audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      // const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // audioStreamRef.current = stream;
-      // const source = audioContextRef.current.createMediaStreamSource(stream);
-      // const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1); // Or AudioWorklet
-      // audioProcessorNodeRef.current = processor;
-      // source.connect(processor);
-      // processor.connect(audioContextRef.current.destination);
-      // processor.onaudioprocess = (e) => {
-      //   const inputData = e.inputBuffer.getChannelData(0);
-      //   // Process inputData and send to whisperModuleRef.current
-      //   // const transcribedText = whisperModuleRef.current.process(inputData);
-      //   // if (transcribedText) updateCurrentQuestionState({ answer: (currentQuestionState?.answer || '') + transcribedText });
-      // };
-
-    } catch (e) {
-      console.error("Error starting whisper.cpp transcription:", e);
-      toast({ title: "STT Error", description: "Could not start voice recognition.", variant: "destructive"});
-      setIsTranscribing(false); 
-    }
-  }, [isTranscribing, toast, updateCurrentQuestionState, currentQuestionState]);
-
-  const readQuestionAndPotentiallyListen = useCallback((questionText: string) => {
-    if (!speechSynthesis || !questionText) {
-      if (isQnAActive && whisperModuleRef.current) { // Check for whisper module
-         actuallyStartTranscription();
-      }
-      return;
-    }
-    speechSynthesis.cancel(); // Stop any ongoing speech
-    const utterance = new SpeechSynthesisUtterance(questionText);
-    utterance.onend = () => {
-      if (isQnAActive && whisperModuleRef.current) {
-        actuallyStartTranscription();
-      }
-    };
-    utterance.onerror = (event) => {
-      console.error("Speech synthesis error", event);
-      toast({ title: "Error", description: "Failed to read question aloud.", variant: "destructive" });
-      if (isQnAActive && whisperModuleRef.current) {
-          actuallyStartTranscription();
-      }
-    };
-    speechSynthesis.speak(utterance);
-  }, [isQnAActive, toast, actuallyStartTranscription]);
-
 
   const navigate = useCallback((direction: 'next' | 'prev' | 'skip' | 'jump', targetIndex?: number) => {
     if (questions.length === 0 || !isQnAActive) return;
 
     speechSynthesis?.cancel();
-    stopTranscription(); // Stop whisper.cpp transcription if active
+    stopTranscription();
 
     let newIndex = currentQuestionIndex;
     const oldIndex = currentQuestionIndex;
@@ -205,39 +169,304 @@ export default function DaytraceClientPage() {
     
     if (newIndex !== oldIndex) {
        setCurrentQuestionIndex(newIndex);
-       if (questions[newIndex]) {
-          readQuestionAndPotentiallyListen(questions[newIndex].text);
+       // Auto-save on navigation
+       if (questions.length > 0) {
+         SessionStorage.saveCurrentSession(
+           questions,
+           questionStates,
+           newIndex,
+           isQnAActive,
+           currentSessionId || undefined
+         );
        }
+       // Will trigger reading in useEffect when currentQuestionIndex changes
     } else if ((direction === 'next' || direction === 'skip') && currentQuestionIndex === questions.length - 1 && oldIndex === currentQuestionIndex) {
        toast({ title: "End of questions", description: "You've reached the last question."});
-       if (questions[newIndex]) { 
-          readQuestionAndPotentiallyListen(questions[newIndex].text);
-       }
-    } else if (direction === 'next' || direction === 'skip') { 
-        if (questions[newIndex]) {
-            readQuestionAndPotentiallyListen(questions[newIndex].text);
-        }
     }
-  }, [questions, currentQuestionIndex, questionStates, isQnAActive, readQuestionAndPotentiallyListen, stopTranscription, toast]);
+  }, [questions, currentQuestionIndex, questionStates, isQnAActive, stopTranscription, toast]);
 
-  // Voice command handling via Web Speech API is removed.
-  // Re-implementing with whisper.cpp would require parsing its output.
-  // const handleRecognitionResult = useCallback((event: SpeechRecognitionEvent) => { ... }); Removed
+  const processVoiceCommands = useCallback((text: string, currentQuestionId: string) => {
+    let cleanedText = text;
+    let commandExecuted = false;
+
+    // Check for voice commands (case insensitive)
+    // Support variations: daytrace, day trace, they trace
+    const lowerText = text.toLowerCase();
+    
+    // Define command patterns - check longer phrases first
+    const commandPatterns = [
+      {
+        patterns: [/\b(daytrace|day trace|they trace)\s+set\s+wait\s+to\s+(\d+)\b/gi],
+        command: 'set_wait',
+        execute: (match: RegExpMatchArray) => {
+          const seconds = parseInt(match[2], 10);
+          if (seconds >= 0 && seconds <= 60) {
+            setPauseDuration(seconds);
+            localStorage.setItem('daytrace_pause_duration', seconds.toString());
+            toast({ title: "Voice Command", description: `Wait time set to ${seconds} seconds` });
+          } else {
+            toast({ title: "Voice Command", description: "Wait time must be between 0 and 60 seconds", variant: "destructive" });
+          }
+        }
+      },
+      {
+        patterns: [/\b(daytrace|day trace|they trace)\s+previous\s+question\b/gi, /\b(daytrace|day trace|they trace)\s+previous\b/gi],
+        command: 'prev'
+      },
+      {
+        patterns: [/\b(daytrace|day trace|they trace)\s+clear\s+answer\b/gi],
+        command: 'clear',
+        execute: () => {
+          setQuestionStates(prev => ({
+            ...prev,
+            [currentQuestionId]: {
+              ...(prev[currentQuestionId] || { answer: '', status: 'pending' }),
+              answer: '',
+              status: 'pending'
+            }
+          }));
+          toast({ title: "Voice Command", description: "Answer cleared" });
+        }
+      },
+      {
+        patterns: [/\b(daytrace|day trace|they trace)\s+next\b/gi],
+        command: 'next'
+      },
+      {
+        patterns: [/\b(daytrace|day trace|they trace)\s+skip\b/gi],
+        command: 'skip'
+      },
+      {
+        patterns: [/\b(daytrace|day trace|they trace)\s+summary\b/gi],
+        command: 'summary'
+      },
+      {
+        patterns: [/\b(daytrace|day trace|they trace)\s+repeat\b/gi],
+        command: 'repeat'
+      }
+    ];
+
+    // Check each command pattern
+    for (const { patterns, command, execute } of commandPatterns) {
+      for (const pattern of patterns) {
+        const match = pattern.exec(lowerText);
+        if (match) {
+          cleanedText = text.replace(pattern, '').trim();
+          commandExecuted = true;
+          if (execute) {
+            execute(match);
+          }
+          return { cleanedText, commandExecuted, command };
+        }
+      }
+    }
+
+    return { cleanedText, commandExecuted };
+  }, [toast, setQuestionStates, setPauseDuration]);
+
+  const actuallyStartTranscription = useCallback(async () => {
+    if (!isSpeechReady || !speechRecognitionRef.current) {
+      toast({ title: "STT Not Ready", description: "Speech recognition not available.", variant: "destructive" });
+      return;
+    }
+    if (isTranscribing) {
+      console.log('Already transcribing, ignoring duplicate start request');
+      return;
+    }
+
+    // Ensure speech synthesis is completely stopped before starting transcription
+    if (speechSynthesis && speechSynthesis.speaking) {
+      console.log('Speech synthesis still active, cancelling and waiting');
+      speechSynthesis.cancel();
+      // Wait for speech to stop, then try again once
+      setTimeout(() => {
+        if (!speechSynthesis.speaking && !isTranscribing) {
+          actuallyStartTranscription();
+        }
+      }, 500);
+      return;
+    }
+
+    // Capture current question info at start of transcription
+    const questionAtStart = currentQuestion;
+    const questionIndexAtStart = currentQuestionIndex;
+
+    try {
+      setIsTranscribing(true);
+      toast({ title: "Listening...", description: "Speak now. Recognition will stop automatically when you finish." });
+      
+      const transcribedText = await speechRecognitionRef.current.startListening();
+      
+      if (transcribedText.trim() && questionAtStart) {
+        console.log('Raw transcribed text:', transcribedText);
+        console.log('Question at start:', questionAtStart.id);
+        
+        // Process voice commands first
+        const result = processVoiceCommands(transcribedText, questionAtStart.id);
+        const { cleanedText, commandExecuted, command } = result as any;
+        console.log('Cleaned text after command processing:', cleanedText);
+        
+        if (cleanedText.trim()) {
+          // Get current answer for the question we started with
+          const currentAnswer = questionStates[questionAtStart.id]?.answer || '';
+          const newAnswer = currentAnswer + (currentAnswer ? ' ' : '') + cleanedText;
+          console.log('New answer will be:', newAnswer);
+          
+          // Update the specific question we were answering
+          setQuestionStates(prev => ({
+            ...prev,
+            [questionAtStart.id]: {
+              ...(prev[questionAtStart.id] || { answer: '', status: 'pending' }),
+              answer: newAnswer.trim(),
+              status: 'answered'
+            }
+          }));
+          
+          toast({ title: "Transcription", description: `Added: "${cleanedText}"` });
+        }
+        
+        // Execute voice commands after saving text
+        if (commandExecuted && command) {
+          setTimeout(() => {
+            if (command === 'next') {
+              navigate('next');
+              toast({ title: "Voice Command", description: "Moving to next question" });
+            } else if (command === 'prev') {
+              navigate('prev');
+              toast({ title: "Voice Command", description: "Moving to previous question" });
+            } else if (command === 'skip') {
+              navigate('skip');
+              toast({ title: "Voice Command", description: "Skipping question" });
+            } else if (command === 'summary') {
+              handleShowSummary();
+              toast({ title: "Voice Command", description: "Showing summary" });
+            } else if (command === 'repeat') {
+              handleReadAloud();
+              toast({ title: "Voice Command", description: "Repeating question" });
+            }
+          }, 100);
+        } else if (!commandExecuted && cleanedText.trim()) {
+          // Auto-advance to next question after a short delay (only if no command was executed AND not on last question)
+          if (questionIndexAtStart < questions.length - 1) {
+            setTimeout(() => {
+              console.log('Auto-advancing from question', questionIndexAtStart + 1, 'to', questionIndexAtStart + 2);
+              navigate('next');
+            }, 1500);
+          } else {
+            // On last question, just show completion message
+            setTimeout(() => {
+              toast({ title: "Complete!", description: "You've finished all questions! Use navigation to review." });
+            }, 1000);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error during transcription:", error);
+      toast({ title: "STT Error", description: "Speech recognition failed. Please try again.", variant: "destructive"});
+    } finally {
+      setIsTranscribing(false);
+    }
+  }, [isTranscribing, isSpeechReady, currentQuestion, currentQuestionIndex, questionStates, questions, navigate, toast]);
+
+  const readQuestionAndPotentiallyListen = useCallback((questionText: string) => {
+    console.log('readQuestionAndPotentiallyListen called with:', questionText);
+    
+    // Prevent multiple simultaneous calls
+    if (readingQuestionRef.current) {
+      console.log('Already reading a question, ignoring this call');
+      return;
+    }
+    
+    // Stop any existing transcription first but don't recurse
+    if (isTranscribing) {
+      console.log('Stopping existing transcription before reading question');
+      stopTranscription();
+      return; // Exit early, don't recurse
+    }
+    
+    readingQuestionRef.current = true;
+    
+    if (!speechSynthesis || !questionText) {
+      console.log('No speech synthesis or question text, starting transcription immediately');
+      if (isQnAActive && isSpeechReady && !isTranscribing) {
+         setTimeout(() => actuallyStartTranscription(), 500);
+      }
+      readingQuestionRef.current = false;
+      return;
+    }
+    
+    // Cancel any existing speech with extra safety
+    if (speechSynthesis.speaking) {
+      console.log('Cancelling existing speech synthesis');
+      speechSynthesis.cancel();
+    }
+    
+    // Wait longer for speech synthesis to clear before starting
+    setTimeout(() => {
+      // Double-check speech synthesis isn't still speaking
+      if (speechSynthesis.speaking) {
+        console.log('Speech still active, skipping this read attempt');
+        return; // Don't recurse, just skip
+      }
+      
+      const utterance = new SpeechSynthesisUtterance(questionText);
+      
+      utterance.onstart = () => {
+        console.log('Started reading question');
+      };
+      
+      utterance.onend = () => {
+        console.log('Finished reading question, starting transcription');
+        readingQuestionRef.current = false;
+        if (isQnAActive && isSpeechReady && !isTranscribing) {
+          // Wait for the configured pause duration, then play audible cue
+          console.log(`Waiting ${pauseDuration} seconds before starting transcription`);
+          setTimeout(() => {
+            if (speechSynthesis) {
+              const cue = new SpeechSynthesisUtterance('beep');
+              cue.rate = 2;
+              cue.pitch = 1.5;
+              cue.volume = 0.3;
+              cue.onend = () => {
+                setTimeout(() => actuallyStartTranscription(), 200);
+              };
+              speechSynthesis.speak(cue);
+            } else {
+              actuallyStartTranscription();
+            }
+          }, pauseDuration * 1000); // Convert seconds to milliseconds
+        }
+      };
+      
+      utterance.onerror = (event) => {
+        console.error("Speech synthesis error", event);
+        readingQuestionRef.current = false;
+        // Only show error toast for non-interrupted errors
+        if (event.error !== 'interrupted' && event.error !== 'canceled') {
+          toast({ title: "Error", description: "Failed to read question aloud.", variant: "destructive" });
+        }
+        // Still start transcription after errors (except for critical ones)
+        if (event.error === 'interrupted' || event.error === 'canceled') {
+          console.log('Speech was interrupted/canceled, starting transcription anyway');
+          if (isQnAActive && isSpeechReady && !isTranscribing) {
+            setTimeout(() => actuallyStartTranscription(), 500);
+          }
+        }
+      };
+      
+      console.log('Starting to speak question');
+      speechSynthesis.speak(utterance);
+    }, 200);
+  }, [isQnAActive, isSpeechReady, isTranscribing, actuallyStartTranscription, stopTranscription, toast, pauseDuration]);
 
   useEffect(() => {
-    // Effect for initializing and cleaning up whisper.cpp related resources if any
-    // For example, if whisperModuleRef.current has a cleanup method
     return () => {
       stopTranscription();
       if (speechSynthesis) {
         speechSynthesis.cancel();
       }
-      // if (whisperModuleRef.current && typeof whisperModuleRef.current.free === 'function') {
-      //   whisperModuleRef.current.free(); // Hypothetical cleanup
-      // }
     };
   }, [stopTranscription]);
-
 
   const handleImportJson = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -257,7 +486,17 @@ export default function DaytraceClientPage() {
           setQuestions(questionsWithIds);
           setCurrentQuestionIndex(0);
           initQuestionStates(questionsWithIds);
-          setIsQnAActive(false); 
+          setIsQnAActive(false);
+          
+          // Create new session when importing questions
+          const sessionId = SessionStorage.saveCurrentSession(
+            questionsWithIds,
+            {},
+            0,
+            false
+          );
+          setCurrentSessionId(sessionId);
+          
           toast({ title: "Success", description: "Questions imported successfully." });
         } catch (error) {
           console.error("Failed to parse JSON:", error);
@@ -274,25 +513,29 @@ export default function DaytraceClientPage() {
       toast({ title: "Info", description: "No data to export." });
       return;
     }
-    const dataToExport = {
-      questions: questions.map(q => ({
-        id: q.id,
-        question: q.text,
-        answer: questionStates[q.id]?.answer || '',
-        status: questionStates[q.id]?.status || 'pending',
-      })),
+    
+    // Use the enhanced session export format
+    const currentSession: SavedSession = {
+      id: currentSessionId || SessionStorage.generateSessionId(),
+      timestamp: Date.now(),
+      questions,
+      questionStates,
+      currentQuestionIndex,
+      isQnAActive,
+      title: `Current Session - ${questions.length} questions`
     };
-    const jsonString = JSON.stringify(dataToExport, null, 2);
+    
+    const jsonString = SessionStorage.exportSessionAsJSON(currentSession);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'daytrace_data.json';
+    a.download = `daytrace_session_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast({ title: "Success", description: "Data exported successfully." });
+    toast({ title: "Success", description: "Session exported successfully with full metadata." });
   };
   
   const handleAnswerChange = (answer: string) => {
@@ -304,8 +547,6 @@ export default function DaytraceClientPage() {
 
   const handleClearAnswer = () => {
     updateCurrentQuestionState({ answer: '' });
-    // If whisper.cpp is active and clearing answer, maybe stop it? Or let user restart.
-    // For now, it just clears the text.
   };
 
   const handleNextQuestion = () => navigate('next');
@@ -317,7 +558,6 @@ export default function DaytraceClientPage() {
     navigate('skip');
   };
   const handleJumpToQuestion = (questionNumber: number) => {
-    // Voice command for jump is removed. This function is for the UI button.
     stopTranscription();
     navigate('jump', questionNumber - 1);
   }
@@ -332,8 +572,8 @@ export default function DaytraceClientPage() {
   };
 
   const handleToggleTranscription = () => {
-    if (!whisperModuleRef.current) { // Check if whisper is loaded
-      toast({ title: "STT Error", description: "Speech recognition module not available or Q&A not active.", variant: "destructive" });
+    if (!isSpeechReady) {
+      toast({ title: "STT Error", description: "Speech recognition not available.", variant: "destructive" });
       return;
     }
     if (!isQnAActive) {
@@ -347,6 +587,11 @@ export default function DaytraceClientPage() {
       actuallyStartTranscription();
     }
   };
+
+  const refreshSavedSessions = useCallback(() => {
+    const allSessions = SessionStorage.getAllSessions();
+    setSavedSessions(allSessions);
+  }, []);
 
   const handleStartQnA = () => {
     if (questions.length > 0) {
@@ -362,16 +607,39 @@ export default function DaytraceClientPage() {
       }));
       setCurrentQuestionIndex(0);
       setIsQnAActive(true);
-      setJustStartedQnA(true); 
+      setJustStartedQnA(true);
+      
+      // Save Q&A start state
+      if (questions.length > 0) {
+        SessionStorage.saveCurrentSession(
+          questions,
+          questionStates,
+          0,
+          true,
+          currentSessionId || undefined
+        );
+      }
     }
   };
 
   useEffect(() => {
     if (justStartedQnA && isQnAActive && currentQuestion && currentQuestionIndex === 0 && questions.length > 0) {
+      console.log('Starting Q&A - reading first question');
       readQuestionAndPotentiallyListen(currentQuestion.text);
       setJustStartedQnA(false); 
     }
-  }, [justStartedQnA, isQnAActive, currentQuestion, currentQuestionIndex, questions, readQuestionAndPotentiallyListen]);
+  }, [justStartedQnA]);
+
+  // Read question when index changes (for navigation) - but not on initial load
+  useEffect(() => {
+    if (isQnAActive && currentQuestion && !justStartedQnA) {
+      console.log('Navigation triggered - reading question', currentQuestionIndex + 1);
+      // Add a small delay to ensure any ongoing speech is properly stopped
+      setTimeout(() => {
+        readQuestionAndPotentiallyListen(currentQuestion.text);
+      }, 200);
+    }
+  }, [currentQuestionIndex]);
   
   const getProgressSummary = () => {
     const answeredCount = Object.values(questionStates).filter(s => s.status === 'answered').length;
@@ -393,7 +661,6 @@ export default function DaytraceClientPage() {
   };
 
   const handleShowSummary = () => {
-    // Voice command for summary is removed. This function is for the UI button.
     if (questions.length === 0) {
       toast({ title: "Info", description: "No questions loaded to summarize." });
       return;
@@ -408,10 +675,9 @@ export default function DaytraceClientPage() {
   };
   
   const { answeredCount, skippedCount } = getProgressSummary();
-  // STT is disabled if whisper module isn't loaded OR QnA isn't active.
-  const isSttDisabled = !whisperModuleRef.current || !isQnAActive || questions.length === 0;
+  const isSttDisabled = !isSpeechReady || !isQnAActive || questions.length === 0;
   const audioControlsDisabled = !isQnAActive || questions.length === 0;
-  const paletteDisabled = !isQnAActive || questions.length === 0; // Palette voice commands won't work
+  const paletteDisabled = !isQnAActive || questions.length === 0;
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -433,13 +699,34 @@ export default function DaytraceClientPage() {
         </Card>
 
         {questions.length === 0 && (
-            <Card className="min-h-[150px] flex items-center justify-center">
-                <CardContent className="p-6 text-center">
-                    <p className="text-lg text-muted-foreground">
-                        Import questions to start.
-                    </p>
-                </CardContent>
-            </Card>
+            <>
+                <Card className="min-h-[150px] flex items-center justify-center">
+                    <CardContent className="p-6 text-center">
+                        <p className="text-lg text-muted-foreground">
+                            Import questions to start.
+                        </p>
+                    </CardContent>
+                </Card>
+                
+                <Card>
+                    <CardContent className="p-6">
+                        <h3 className="text-lg font-semibold mb-3">How to Use Daytrace</h3>
+                        <div className="space-y-2 text-sm text-muted-foreground">
+                            <p><strong>1. Import Questions:</strong> Upload a JSON file with your questions</p>
+                            <p><strong>2. Start Q&A:</strong> Click "Start Q&A" to begin the session</p>
+                            <p><strong>3. Listen & Respond:</strong> Each question will be read aloud, followed by a "beep" indicating you can speak</p>
+                            <p><strong>4. Voice Commands:</strong> Say "daytrace next", "daytrace previous", "daytrace skip", "daytrace repeat", "daytrace clear answer", or "daytrace set wait to X" during recording</p>
+                            <p><strong>5. Navigation:</strong> Use voice commands or the control buttons to navigate questions</p>
+                            <p className="text-xs mt-3 italic">Note: Voice commands also work with "day trace" or "they trace" if speech recognition mishears the phrase.</p>
+                        </div>
+                    </CardContent>
+                </Card>
+                
+                <SessionManager 
+                  savedSessions={savedSessions}
+                  onSessionsUpdate={refreshSavedSessions}
+                />
+            </>
         )}
 
         {!isQnAActive && questions.length > 0 && (
@@ -487,8 +774,8 @@ export default function DaytraceClientPage() {
                         onReadAloud={handleReadAloud}
                         onToggleTranscription={handleToggleTranscription}
                         isTranscribing={isTranscribing}
-                        isAudioDisabled={audioControlsDisabled} // For read aloud button
-                        isSttDisabled={isSttDisabled} // Specifically for STT button
+                        isAudioDisabled={audioControlsDisabled}
+                        isSttDisabled={isSttDisabled}
                     />
                 </CardContent>
             </Card>
@@ -496,15 +783,14 @@ export default function DaytraceClientPage() {
         )}
 
         <VoiceCommandPalette
-          onRepeat={handleReadAloud} // This button will still work
-          onClearAnswer={handleClearAnswer} // This button will still work
-          onJumpToQuestion={handleJumpToQuestion} // This button will still work
-          onSummary={handleShowSummary} // This button will still work
-          isPaletteDisabled={paletteDisabled} // Disables buttons if Q&A not active
+          onRepeat={handleReadAloud}
+          onClearAnswer={handleClearAnswer}
+          onJumpToQuestion={handleJumpToQuestion}
+          onSummary={handleShowSummary}
+          isPaletteDisabled={paletteDisabled}
           maxQuestions={questions.length}
-          // Note: Actual voice commands like "Daytrace repeat" are no longer functional
-          // as the underlying SpeechRecognition API has been removed.
-          // This component now serves as a UI for these actions.
+          pauseDuration={pauseDuration}
+          onPauseDurationChange={setPauseDuration}
         />
       </main>
       <footer className="text-center py-4 text-sm text-muted-foreground border-t space-y-2">

@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(npm install:*)",
+      "Bash(chmod:*)",
+      "Bash(npx cap init:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run setup-whisper:*)",
+      "Bash(ls:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:*)"
+    ],
+    "deny": []
+  }
+}

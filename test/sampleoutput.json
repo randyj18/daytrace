@@ -1,0 +1,11 @@
+[
+  {
+    "question": "Mammoth Colossus - Permanent Ability - When opponent cards enter play in your DZ, they get 1 'frozen' counter. Cards with frozen counters have -1 skill while in your DZ"
+  },
+  {
+    "question": "Mammoth Colossus - One Time Ability - If there are 3+ total frozen counters on opponent cards, automatically win this battle. Otherwise, add 1 frozen counter to each opponent active card"
+  },
+  {
+    "question": "Shell Shield - Permanent Ability - The first time each turn this card would lose a battle, roll a d20. On 17+, force a tie instead"
+  }
+]

@@ -1,0 +1,12 @@
+[
+    { "question": "What is the main goal for your project today?" },
+    { "question": "What blockers are currently slowing down your progress?" },
+    { "question": "What feature or function are you focusing on implementing next?" },
+    { "question": "Is there any refactoring you’ve been putting off?" },
+    { "question": "What technical debt is building up?" },
+    { "question": "What decisions are you waiting on from others?" },
+    { "question": "What test coverage are you aiming to improve?" },
+    { "question": "What tools or libraries are helping you the most today?" },
+    { "question": "Is there anything you want to try differently tomorrow?" },
+    { "question": "What’s one insight or lesson from today’s work?" }
+  ]  
