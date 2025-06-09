@@ -46,6 +46,40 @@ export default function DaytraceClientPage() {
   const currentQuestion = questions[currentQuestionIndex];
   const currentQuestionState = currentQuestion ? questionStates[currentQuestion.id] : undefined;
 
+  // Function to play a ding sound using Web Audio API
+  const playDingSound = useCallback((onComplete?: () => void) => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Create a pleasant ding sound (bell-like frequencies)
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.1);
+      
+      // Volume envelope for a bell-like sound
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+      
+      if (onComplete) {
+        setTimeout(onComplete, 350); // Wait for sound to finish
+      }
+    } catch (error) {
+      console.warn('Could not play ding sound:', error);
+      // Fallback: just call the completion callback
+      if (onComplete) {
+        setTimeout(onComplete, 100);
+      }
+    }
+  }, []);
+
   const initQuestionStates = useCallback((qs: Question[]) => {
     const initialStates: AllQuestionStates = {};
     qs.forEach(q => {
@@ -419,19 +453,10 @@ export default function DaytraceClientPage() {
         console.log('Finished reading question, starting transcription immediately');
         readingQuestionRef.current = false;
         if (isQnAActive && isSpeechReady && !isTranscribing) {
-          // Play audible cue immediately, then start STT
-          if (speechSynthesis) {
-            const cue = new SpeechSynthesisUtterance('beep');
-            cue.rate = 2;
-            cue.pitch = 1.5;
-            cue.volume = 0.3;
-            cue.onend = () => {
-              setTimeout(() => actuallyStartTranscription(), 200);
-            };
-            speechSynthesis.speak(cue);
-          } else {
-            actuallyStartTranscription();
-          }
+          // Play audible ding cue immediately, then start STT
+          playDingSound(() => {
+            setTimeout(() => actuallyStartTranscription(), 200);
+          });
         }
       };
       
