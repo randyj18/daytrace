@@ -94,8 +94,18 @@ export default function DaytraceClientPage() {
 
   // Find first unanswered question index
   const findFirstUnansweredIndex = useCallback(() => {
-    return questions.findIndex(q => isQuestionUnanswered(q.id));
-  }, [questions, isQuestionUnanswered]);
+    const result = questions.findIndex(q => {
+      const isUnanswered = isQuestionUnanswered(q.id);
+      console.log(`[FIND UNANSWERED] Question ${q.id}: isUnanswered=${isUnanswered}`, {
+        state: questionStates[q.id],
+        answer: questionStates[q.id]?.answer,
+        status: questionStates[q.id]?.status
+      });
+      return isUnanswered;
+    });
+    console.log(`[FIND UNANSWERED] First unanswered question index: ${result}`);
+    return result;
+  }, [questions, isQuestionUnanswered, questionStates]);
 
   // State monitoring - log and alert if we're ever in an invalid state
   useEffect(() => {
@@ -401,7 +411,7 @@ export default function DaytraceClientPage() {
     return { cleanedText, commandExecuted };
   }, [toast, setQuestionStates, handlePause, handleResume]);
 
-  const actuallyStartTranscription = useCallback(async () => {
+  const actuallyStartTranscription = async () => {
     console.log('[STT] actuallyStartTranscription called');
     console.log(`[STATE TRANSITION] Starting STT. Previous state: ${getCurrentState()}`);
     
@@ -585,14 +595,18 @@ export default function DaytraceClientPage() {
         if (isQnAActive && newState === 'none') {
           console.log('🚨 [STT] Detected invalid state after STT ended - should restart STT or start TTS');
           // If we're in an invalid state and Q&A is active, restart STT
-          if (isSpeechReady && currentQuestion) {
+          if (isSpeechReady && currentQuestion && speechRecognitionRef.current) {
             console.log('[STT] Auto-restarting STT due to invalid state');
-            setTimeout(() => actuallyStartTranscription(), 500);
+            setTimeout(() => {
+              if (speechRecognitionRef.current && !isTranscribing) {
+                speechRecognitionRef.current.startListening().catch(console.error);
+              }
+            }, 500);
           }
         }
       }, 100); // Small delay to let state settle
     }
-  }, [isTranscribing, isSpeechReady, currentQuestion, currentQuestionIndex, questionStates, questions, navigate, toast, getCurrentState, isQnAActive]);
+  };
 
   const readQuestionAndPotentiallyListen = useCallback((questionText: string) => {
     console.log('[TTS] readQuestionAndPotentiallyListen called with:', questionText);
@@ -615,8 +629,21 @@ export default function DaytraceClientPage() {
     
     if (!speechSynthesis || !questionText) {
       console.log('No speech synthesis or question text, starting transcription immediately');
-      if (isQnAActive && isSpeechReady && !isTranscribing) {
-         setTimeout(() => actuallyStartTranscription(), 500);
+      if (isQnAActive && isSpeechReady && !isTranscribing && speechRecognitionRef.current) {
+         setTimeout(() => {
+           if (speechRecognitionRef.current && !isTranscribing) {
+             setIsTranscribing(true);
+             speechRecognitionRef.current.startListening()
+               .then((text) => {
+                 console.log('[NO-TTS] Direct transcription result:', text);
+                 setIsTranscribing(false);
+               })
+               .catch((error) => {
+                 console.error('[NO-TTS] Transcription error:', error);
+                 setIsTranscribing(false);
+               });
+           }
+         }, 500);
       }
       readingQuestionRef.current = false;
       return;
@@ -673,7 +700,7 @@ export default function DaytraceClientPage() {
       console.log('[TTS] Starting to speak question');
       speechSynthesis.speak(utterance);
     }, 200);
-  }, [isQnAActive, isSpeechReady, isTranscribing, actuallyStartTranscription, stopTranscription, toast, pauseDuration]);
+  }, [isQnAActive, isSpeechReady, isTranscribing, stopTranscription, toast, pauseDuration, getCurrentState, playDingSound]);
 
   useEffect(() => {
     return () => {
@@ -924,8 +951,17 @@ export default function DaytraceClientPage() {
     } else if (pausedContent.type === 'stt') {
       console.log('[RESUME] Resuming STT');
       // Resume STT
-      if (isSpeechReady && !isTranscribing) {
-        actuallyStartTranscription();
+      if (isSpeechReady && !isTranscribing && speechRecognitionRef.current) {
+        setIsTranscribing(true);
+        speechRecognitionRef.current.startListening()
+          .then((text) => {
+            console.log('[RESUME] Transcription result:', text);
+            setIsTranscribing(false);
+          })
+          .catch((error) => {
+            console.error('[RESUME] Transcription error:', error);
+            setIsTranscribing(false);
+          });
       } else {
         console.log('[RESUME] Cannot resume STT:', { isSpeechReady, isTranscribing });
       }
@@ -950,7 +986,18 @@ export default function DaytraceClientPage() {
     if (isTranscribing) {
       stopTranscription();
     } else {
-      actuallyStartTranscription();
+      if (speechRecognitionRef.current && !isTranscribing) {
+        setIsTranscribing(true);
+        speechRecognitionRef.current.startListening()
+          .then((text) => {
+            console.log('[TOGGLE] Transcription result:', text);
+            setIsTranscribing(false);
+          })
+          .catch((error) => {
+            console.error('[TOGGLE] Transcription error:', error);
+            setIsTranscribing(false);
+          });
+      }
     }
   };
 
