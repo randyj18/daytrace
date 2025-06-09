@@ -1,6 +1,7 @@
 export interface Question {
   id: string;
   text: string;
+  context?: Record<string, any>;
 }
 
 export type QuestionStatus = "pending" | "answered" | "skipped";

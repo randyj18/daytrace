@@ -50,7 +50,7 @@ export function VoiceCommandPalette({ onRepeat, onClearAnswer, onJumpToQuestion,
 
   const handlePauseSubmit: SubmitHandler<PauseFormValues> = (data) => {
     onPauseDurationChange(data.pauseDuration);
-    localStorage.setItem('daytrace_pause_duration', data.pauseDuration.toString());
+    // localStorage.setItem('daytrace_pause_duration', data.pauseDuration.toString());
   };
   
   return (

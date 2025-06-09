@@ -28,8 +28,21 @@ export function QuestionDisplay({ question, currentQuestionNumber, totalQuestion
           Question {currentQuestionNumber} of {totalQuestions}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <p className="text-2xl leading-relaxed">{question.text}</p>
+        {question.context && Object.keys(question.context).length > 0 && (
+          <div className="border-t pt-4">
+            <h4 className="text-sm font-semibold text-muted-foreground mb-2">Additional Context:</h4>
+            <div className="space-y-2 text-sm">
+              {Object.entries(question.context).map(([key, value]) => (
+                <div key={key} className="flex flex-col sm:flex-row sm:gap-2">
+                  <span className="font-medium text-muted-foreground capitalize">{key}:</span>
+                  <span className="text-foreground">{typeof value === 'string' ? value : JSON.stringify(value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

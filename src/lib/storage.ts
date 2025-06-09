@@ -157,6 +157,7 @@ export class SessionStorage {
         question: q.text,
         answer: session.questionStates[q.id]?.answer || '',
         status: session.questionStates[q.id]?.status || 'pending',
+        ...(q.context || {})
       })),
       summary: {
         totalQuestions: session.questions.length,

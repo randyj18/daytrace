@@ -39,7 +39,7 @@ export default function DaytraceClientPage() {
   const readingQuestionRef = useRef(false);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
-  const [pauseDuration, setPauseDuration] = useState<number>(3); // Default 3 seconds
+  const [pauseDuration, setPauseDuration] = useState<number>(3); // STT now starts immediately after TTS, but keeping for voice commands
 
   const { toast } = useToast();
 
@@ -103,13 +103,13 @@ export default function DaytraceClientPage() {
       setSavedSessions(allSessions);
       
       // Load pause duration from localStorage
-      const savedPauseDuration = localStorage.getItem('daytrace_pause_duration');
-      if (savedPauseDuration) {
-        const duration = parseInt(savedPauseDuration, 10);
-        if (duration >= 0 && duration <= 60) {
-          setPauseDuration(duration);
-        }
-      }
+      // const savedPauseDuration = localStorage.getItem('daytrace_pause_duration');
+      // if (savedPauseDuration) {
+      //   const duration = parseInt(savedPauseDuration, 10);
+      //   if (duration >= 0 && duration <= 60) {
+      //     setPauseDuration(duration);
+      //   }
+      // }
       
       if (savedSession && savedSession.questions.length > 0) {
         console.log('Restoring saved session:', savedSession.id);
@@ -195,20 +195,20 @@ export default function DaytraceClientPage() {
     
     // Define command patterns - check longer phrases first
     const commandPatterns = [
-      {
-        patterns: [/\b(daytrace|day trace|they trace)\s+set\s+wait\s+to\s+(\d+)\b/gi],
-        command: 'set_wait',
-        execute: (match: RegExpMatchArray) => {
-          const seconds = parseInt(match[2], 10);
-          if (seconds >= 0 && seconds <= 60) {
-            setPauseDuration(seconds);
-            localStorage.setItem('daytrace_pause_duration', seconds.toString());
-            toast({ title: "Voice Command", description: `Wait time set to ${seconds} seconds` });
-          } else {
-            toast({ title: "Voice Command", description: "Wait time must be between 0 and 60 seconds", variant: "destructive" });
-          }
-        }
-      },
+      // {
+      //   patterns: [/\b(daytrace|day trace|they trace)\s+set\s+wait\s+to\s+(\d+)\b/gi],
+      //   command: 'set_wait',
+      //   execute: (match: RegExpMatchArray) => {
+      //     const seconds = parseInt(match[2], 10);
+      //     if (seconds >= 0 && seconds <= 60) {
+      //       setPauseDuration(seconds);
+      //       // localStorage.setItem('daytrace_pause_duration', seconds.toString());
+      //       toast({ title: "Voice Command", description: `Wait time set to ${seconds} seconds` });
+      //     } else {
+      //       toast({ title: "Voice Command", description: "Wait time must be between 0 and 60 seconds", variant: "destructive" });
+      //     }
+      //   }
+      // },
       {
         patterns: [/\b(daytrace|day trace|they trace)\s+previous\s+question\b/gi, /\b(daytrace|day trace|they trace)\s+previous\b/gi],
         command: 'prev'
@@ -262,7 +262,7 @@ export default function DaytraceClientPage() {
     }
 
     return { cleanedText, commandExecuted };
-  }, [toast, setQuestionStates, setPauseDuration]);
+  }, [toast, setQuestionStates]);
 
   const actuallyStartTranscription = useCallback(async () => {
     if (!isSpeechReady || !speechRecognitionRef.current) {
@@ -416,25 +416,22 @@ export default function DaytraceClientPage() {
       };
       
       utterance.onend = () => {
-        console.log('Finished reading question, starting transcription');
+        console.log('Finished reading question, starting transcription immediately');
         readingQuestionRef.current = false;
         if (isQnAActive && isSpeechReady && !isTranscribing) {
-          // Wait for the configured pause duration, then play audible cue
-          console.log(`Waiting ${pauseDuration} seconds before starting transcription`);
-          setTimeout(() => {
-            if (speechSynthesis) {
-              const cue = new SpeechSynthesisUtterance('beep');
-              cue.rate = 2;
-              cue.pitch = 1.5;
-              cue.volume = 0.3;
-              cue.onend = () => {
-                setTimeout(() => actuallyStartTranscription(), 200);
-              };
-              speechSynthesis.speak(cue);
-            } else {
-              actuallyStartTranscription();
-            }
-          }, pauseDuration * 1000); // Convert seconds to milliseconds
+          // Play audible cue immediately, then start STT
+          if (speechSynthesis) {
+            const cue = new SpeechSynthesisUtterance('beep');
+            cue.rate = 2;
+            cue.pitch = 1.5;
+            cue.volume = 0.3;
+            cue.onend = () => {
+              setTimeout(() => actuallyStartTranscription(), 200);
+            };
+            speechSynthesis.speak(cue);
+          } else {
+            actuallyStartTranscription();
+          }
         }
       };
       
@@ -479,10 +476,14 @@ export default function DaytraceClientPage() {
           if (!Array.isArray(parsedInput) || !parsedInput.every(q => typeof q.question === 'string')) {
             throw new Error("Invalid JSON format. Expected an array of objects with a 'question' property.");
           }
-          const questionsWithIds: Question[] = parsedInput.map((q, index) => ({
-            text: q.question,
-            id: q.id || `q-${Date.now()}-${index}`
-          }));
+          const questionsWithIds: Question[] = parsedInput.map((q, index) => {
+            const { question, id, ...context } = q;
+            return {
+              text: question,
+              id: id || `q-${Date.now()}-${index}`,
+              context: Object.keys(context).length > 0 ? context : undefined
+            };
+          });
           setQuestions(questionsWithIds);
           setCurrentQuestionIndex(0);
           initQuestionStates(questionsWithIds);
