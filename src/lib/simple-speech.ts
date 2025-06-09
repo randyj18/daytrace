@@ -84,7 +84,12 @@ export class SimpleSpeechRecognition {
       this.recognition.onerror = (event: any) => {
         this.isListening = false;
         if (silenceTimer) clearTimeout(silenceTimer);
-        reject(new Error(`Speech recognition error: ${event.error}`));
+        // Handle common errors more gracefully
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+          resolve(finalTranscript.trim()); // Return whatever we have
+        } else {
+          reject(new Error(`Speech recognition error: ${event.error}`));
+        }
       };
 
       this.recognition.onend = () => {

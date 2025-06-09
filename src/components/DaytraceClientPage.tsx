@@ -366,7 +366,15 @@ export default function DaytraceClientPage() {
         if (cleanedText.trim()) {
           // Get current answer for the question we started with
           const currentAnswer = questionStates[questionAtStart.id]?.answer || '';
-          const newAnswer = currentAnswer + (currentAnswer ? ' ' : '') + cleanedText;
+          
+          // Check if there's already text - if so, append; if not, replace
+          let newAnswer;
+          if (currentAnswer.trim() === '') {
+            newAnswer = cleanedText; // First input - replace empty answer
+          } else {
+            newAnswer = currentAnswer + ' ' + cleanedText; // Subsequent input - append
+          }
+          
           console.log('New answer will be:', newAnswer);
           
           // Update the specific question we were answering
@@ -379,7 +387,8 @@ export default function DaytraceClientPage() {
             }
           }));
           
-          toast({ title: "Transcription", description: `Added: "${cleanedText}"` });
+          const action = currentAnswer.trim() === '' ? 'Set' : 'Added';
+          toast({ title: "Transcription", description: `${action}: "${cleanedText}"` });
         }
         
         // Execute voice commands after saving text
@@ -490,13 +499,9 @@ export default function DaytraceClientPage() {
         if (event.error !== 'interrupted' && event.error !== 'canceled') {
           toast({ title: "Error", description: "Failed to read question aloud.", variant: "destructive" });
         }
-        // Still start transcription after errors (except for critical ones)
-        if (event.error === 'interrupted' || event.error === 'canceled') {
-          console.log('Speech was interrupted/canceled, starting transcription anyway');
-          if (isQnAActive && isSpeechReady && !isTranscribing) {
-            setTimeout(() => actuallyStartTranscription(), 500);
-          }
-        }
+        // For interrupted/canceled speech, don't auto-start STT to avoid stuck state
+        // User can manually start recording if needed
+        console.log('Speech was interrupted/canceled, not auto-starting STT');
       };
       
       console.log('Starting to speak question');
@@ -583,12 +588,18 @@ export default function DaytraceClientPage() {
           }
           
           setQuestions(questionsWithIds);
-          setCurrentQuestionIndex(0);
           
           if (Object.keys(questionStatesData).length > 0) {
             setQuestionStates(questionStatesData);
+            // Find first unanswered question for session continuation
+            const firstUnansweredIndex = questionsWithIds.findIndex(q => {
+              const state = questionStatesData[q.id];
+              return !state || state.status === 'pending';
+            });
+            setCurrentQuestionIndex(firstUnansweredIndex >= 0 ? firstUnansweredIndex : 0);
           } else {
             initQuestionStates(questionsWithIds);
+            setCurrentQuestionIndex(0);
           }
           
           setIsQnAActive(false);
@@ -743,10 +754,15 @@ export default function DaytraceClientPage() {
   useEffect(() => {
     if (isQnAActive && currentQuestion && !justStartedQnA) {
       console.log('Navigation triggered - reading question', currentQuestionIndex + 1);
-      // Add a small delay to ensure any ongoing speech is properly stopped
+      // Ensure any ongoing operations are stopped
+      stopTranscription();
+      if (speechSynthesis) {
+        speechSynthesis.cancel();
+      }
+      // Add a longer delay to ensure clean state transition
       setTimeout(() => {
         readQuestionAndPotentiallyListen(currentQuestion.text);
-      }, 200);
+      }, 500);
     }
   }, [currentQuestionIndex]);
   
