@@ -815,8 +815,6 @@ export default function DaytraceClientPage() {
           onSummary={handleShowSummary}
           isPaletteDisabled={paletteDisabled}
           maxQuestions={questions.length}
-          pauseDuration={pauseDuration}
-          onPauseDurationChange={setPauseDuration}
         />
       </main>
       <footer className="text-center py-4 text-sm text-muted-foreground border-t space-y-2">
