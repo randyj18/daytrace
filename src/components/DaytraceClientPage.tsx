@@ -423,6 +423,7 @@ export default function DaytraceClientPage() {
       const transcribedText = await speechRecognitionRef.current.startListening();
       
       console.log('[STT] Speech recognition completed, processing results');
+      console.log('[STT] Transcribed text length:', transcribedText.length, 'Content:', transcribedText);
       console.log(`[STATE TRANSITION] STT ended. Current state: ${getCurrentState()}`);
       
       if (transcribedText.trim() && questionAtStart) {
@@ -540,14 +541,41 @@ export default function DaytraceClientPage() {
             }, 1000);
           }
         }
+      } else {
+        console.log('[STT] No transcribed text received. Details:', {
+          transcribedTextLength: transcribedText.length,
+          transcribedText: `"${transcribedText}"`,
+          questionAtStart: questionAtStart?.id,
+          hasQuestion: !!questionAtStart
+        });
+        
+        if (!questionAtStart) {
+          console.error('[STT] Question was lost during transcription!');
+        }
       }
     } catch (error) {
-      console.error("Error during transcription:", error);
+      console.error("[STT] Error during transcription:", error);
       toast({ title: "STT Error", description: "Speech recognition failed. Please try again.", variant: "destructive"});
     } finally {
+      console.log('[STT] Transcription session ended, setting isTranscribing to false');
       setIsTranscribing(false);
+      
+      // Check if we need to restart STT or enter a different state
+      setTimeout(() => {
+        const newState = getCurrentState();
+        console.log(`[STATE CHECK] After STT ended, current state is: ${newState}`);
+        
+        if (isQnAActive && newState === 'none') {
+          console.log('🚨 [STT] Detected invalid state after STT ended - should restart STT or start TTS');
+          // If we're in an invalid state and Q&A is active, restart STT
+          if (isSpeechReady && currentQuestion) {
+            console.log('[STT] Auto-restarting STT due to invalid state');
+            setTimeout(() => actuallyStartTranscription(), 500);
+          }
+        }
+      }, 100); // Small delay to let state settle
     }
-  }, [isTranscribing, isSpeechReady, currentQuestion, currentQuestionIndex, questionStates, questions, navigate, toast]);
+  }, [isTranscribing, isSpeechReady, currentQuestion, currentQuestionIndex, questionStates, questions, navigate, toast, getCurrentState, isQnAActive, actuallyStartTranscription]);
 
   const readQuestionAndPotentiallyListen = useCallback((questionText: string) => {
     console.log('[TTS] readQuestionAndPotentiallyListen called with:', questionText);
