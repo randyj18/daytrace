@@ -19,9 +19,10 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  output: 'export',
-  trailingSlash: true,
-  distDir: 'out',
+  // Removed static export settings for Vercel deployment
+  // output: 'export',
+  // trailingSlash: true,
+  // distDir: 'out',
 };
 
 export default nextConfig;
