@@ -409,7 +409,7 @@ export default function DaytraceClientPage() {
     }
 
     return { cleanedText, commandExecuted };
-  }, [toast, setQuestionStates, handlePause, handleResume]);
+  }, [toast, setQuestionStates]);
 
   const actuallyStartTranscription = async () => {
     console.log('[STT] actuallyStartTranscription called');
@@ -897,7 +897,7 @@ export default function DaytraceClientPage() {
     readQuestionAndPotentiallyListen(currentQuestion.text);
   };
 
-  const handlePause = () => {
+  const handlePause = useCallback(() => {
     console.log('[PAUSE] Pause requested');
     console.log(`[STATE TRANSITION] Pausing from state: ${getCurrentState()}`);
     
@@ -933,9 +933,9 @@ export default function DaytraceClientPage() {
     } else {
       console.log('[PAUSE] No active TTS or STT to pause');
     }
-  };
+  }, [isPaused, getCurrentState, currentQuestion, isTranscribing, stopTranscription, toast]);
 
-  const handleResume = () => {
+  const handleResume = useCallback(() => {
     console.log('[RESUME] Resume requested');
     console.log(`[STATE TRANSITION] Resuming from state: ${getCurrentState()}`);
     
@@ -971,7 +971,7 @@ export default function DaytraceClientPage() {
     setIsPaused(false);
     console.log(`[STATE TRANSITION] Resumed. Current state: ${getCurrentState()}`);
     toast({ title: "Resumed", description: "Continuing..." });
-  };
+  }, [isPaused, pausedContent, getCurrentState, readQuestionAndPotentiallyListen, isSpeechReady, isTranscribing, toast]);
 
   const handleToggleTranscription = () => {
     if (!isSpeechReady) {
