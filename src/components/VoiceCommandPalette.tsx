@@ -1,13 +1,10 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { RefreshCw, ArrowLeftRight, EraserIcon, Info, ListChecks, RadioTower } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { useForm, SubmitHandler } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface VoiceCommandPaletteProps {
   onRepeat: () => void;
@@ -18,22 +15,18 @@ interface VoiceCommandPaletteProps {
   maxQuestions: number;
 }
 
-const jumpSchema = z.object({
-  questionNumber: z.coerce.number().min(1, "Must be at least 1")
-});
-type JumpFormValues = z.infer<typeof jumpSchema>;
-
 export function VoiceCommandPalette({ onRepeat, onClearAnswer, onJumpToQuestion, onSummary, isPaletteDisabled, maxQuestions }: VoiceCommandPaletteProps) {
-  const { register, handleSubmit, formState: { errors }, setValue } = useForm<JumpFormValues>({
-    resolver: zodResolver(jumpSchema.extend({
-      questionNumber: z.coerce.number().min(1, "Must be at least 1").max(maxQuestions > 0 ? maxQuestions : 1 , `Must be at most ${maxQuestions || 1}`)
-    }))
-  });
+  const [selectedQuestion, setSelectedQuestion] = useState<string>("");
 
-  const handleJumpSubmit: SubmitHandler<JumpFormValues> = (data) => {
-    onJumpToQuestion(data.questionNumber);
-    setValue("questionNumber", "" as any); 
+  const handleJumpSubmit = () => {
+    if (selectedQuestion) {
+      onJumpToQuestion(parseInt(selectedQuestion));
+      setSelectedQuestion(""); // Clear selection after jump
+    }
   };
+
+  // Generate question options
+  const questionOptions = Array.from({ length: maxQuestions }, (_, i) => i + 1);
   
   return (
     <Card className="shadow-md animate-fade-in">
@@ -59,25 +52,35 @@ export function VoiceCommandPalette({ onRepeat, onClearAnswer, onJumpToQuestion,
           </Button>
         </div>
         <div className="flex justify-center">
-          <form onSubmit={handleSubmit(handleJumpSubmit)} className="flex items-end gap-2 max-w-sm">
+          <div className="flex items-end gap-2 max-w-sm">
             <div className="flex-grow">
-              <Label htmlFor="jumpInput" className="text-sm">Jump to Question</Label>
-              <Input
-                id="jumpInput"
-                type="number"
-                {...register("questionNumber")}
-                placeholder="No."
-                min="1"
-                max={maxQuestions > 0 ? maxQuestions : undefined}
+              <Label htmlFor="jumpSelect" className="text-sm">Jump to Question</Label>
+              <Select 
+                value={selectedQuestion} 
+                onValueChange={setSelectedQuestion}
                 disabled={isPaletteDisabled || maxQuestions === 0}
-                className="w-full mt-1"
-              />
-              {errors.questionNumber && <p className="text-xs text-destructive mt-1">{errors.questionNumber.message}</p>}
+              >
+                <SelectTrigger id="jumpSelect" className="w-full mt-1">
+                  <SelectValue placeholder="Select question..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {questionOptions.map((questionNum) => (
+                    <SelectItem key={questionNum} value={questionNum.toString()}>
+                      Question {questionNum}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Button type="submit" variant="outline" size="sm" disabled={isPaletteDisabled || maxQuestions === 0}>
+            <Button 
+              onClick={handleJumpSubmit} 
+              variant="outline" 
+              size="sm" 
+              disabled={isPaletteDisabled || maxQuestions === 0 || !selectedQuestion}
+            >
               <ArrowLeftRight className="mr-2 h-4 w-4" /> Jump
             </Button>
-          </form>
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -79,6 +79,24 @@ export default function DaytraceClientPage() {
 
   const currentQuestion = questions[currentQuestionIndex];
 
+  // Utility function to check if a question is unanswered
+  const isQuestionUnanswered = useCallback((questionId: string) => {
+    const state = questionStates[questionId];
+    // Question is unanswered if:
+    // 1. No state exists at all, OR
+    // 2. Status is 'pending', OR  
+    // 3. Answer is empty/whitespace only
+    return !state || 
+           state.status === 'pending' || 
+           !state.answer || 
+           state.answer.trim() === '';
+  }, [questionStates]);
+
+  // Find first unanswered question index
+  const findFirstUnansweredIndex = useCallback(() => {
+    return questions.findIndex(q => isQuestionUnanswered(q.id));
+  }, [questions, isQuestionUnanswered]);
+
   // State monitoring - log and alert if we're ever in an invalid state
   useEffect(() => {
     // Only run on client side to avoid SSR issues
@@ -471,11 +489,10 @@ export default function DaytraceClientPage() {
             
             setTimeout(() => {
               if (wasBlankQuestion) {
-                // Completing mode: jump to next blank question
+                // Completing mode: jump to next blank question after current
                 const nextBlankIndex = questions.findIndex((q, idx) => {
                   if (idx <= currentIndex) return false;
-                  const state = questionStates[q.id];
-                  return !state || state.status === 'pending' || state.answer.trim() === '';
+                  return isQuestionUnanswered(q.id);
                 });
                 
                 if (nextBlankIndex >= 0) {
@@ -575,7 +592,7 @@ export default function DaytraceClientPage() {
         }
       }, 100); // Small delay to let state settle
     }
-  }, [isTranscribing, isSpeechReady, currentQuestion, currentQuestionIndex, questionStates, questions, navigate, toast, getCurrentState, isQnAActive, actuallyStartTranscription]);
+  }, [isTranscribing, isSpeechReady, currentQuestion, currentQuestionIndex, questionStates, questions, navigate, toast, getCurrentState, isQnAActive]);
 
   const readQuestionAndPotentiallyListen = useCallback((questionText: string) => {
     console.log('[TTS] readQuestionAndPotentiallyListen called with:', questionText);
@@ -740,11 +757,24 @@ export default function DaytraceClientPage() {
           
           if (Object.keys(questionStatesData).length > 0) {
             setQuestionStates(questionStatesData);
-            // Find first unanswered question for session continuation
+            // Find first unanswered question for session continuation using proper logic
             const firstUnansweredIndex = questionsWithIds.findIndex(q => {
               const state = questionStatesData[q.id];
-              return !state || state.status === 'pending';
+              // Question is unanswered if:
+              // 1. No state exists at all, OR
+              // 2. Status is 'pending', OR  
+              // 3. Answer is empty/whitespace only
+              return !state || 
+                     state.status === 'pending' || 
+                     !state.answer || 
+                     state.answer.trim() === '';
             });
+            
+            console.log('[IMPORT] First unanswered question index:', firstUnansweredIndex);
+            if (firstUnansweredIndex >= 0) {
+              console.log('[IMPORT] Jumping to first unanswered question:', firstUnansweredIndex + 1);
+            }
+            
             setCurrentQuestionIndex(firstUnansweredIndex >= 0 ? firstUnansweredIndex : 0);
           } else {
             initQuestionStates(questionsWithIds);
@@ -931,15 +961,13 @@ export default function DaytraceClientPage() {
 
   const handleStartQnA = () => {
     if (questions.length > 0) {
-      // Find first unanswered question
-      const firstUnansweredIndex = questions.findIndex(q => {
-        const state = questionStates[q.id];
-        return !state || state.status === 'pending';
-      });
-      
-      const startIndex = firstUnansweredIndex >= 0 ? firstUnansweredIndex : 0;
-      const startQuestion = questions[startIndex];
+      // Find first unanswered question using the same logic as import
+      const startIndex = findFirstUnansweredIndex();
+      const finalStartIndex = startIndex >= 0 ? startIndex : 0;
+      const startQuestion = questions[finalStartIndex];
       const startQuestionId = startQuestion.id;
+
+      console.log('[START Q&A] Starting at question index:', finalStartIndex + 1, 'of', questions.length);
 
       setQuestionStates(prev => ({
         ...prev,
@@ -948,7 +976,7 @@ export default function DaytraceClientPage() {
           status: 'pending',
         },
       }));
-      setCurrentQuestionIndex(startIndex);
+      setCurrentQuestionIndex(finalStartIndex);
       setIsQnAActive(true);
       setJustStartedQnA(true);
       
@@ -957,7 +985,7 @@ export default function DaytraceClientPage() {
         SessionStorage.saveCurrentSession(
           questions,
           questionStates,
-          startIndex,
+          finalStartIndex,
           true,
           currentSessionId || undefined
         );
