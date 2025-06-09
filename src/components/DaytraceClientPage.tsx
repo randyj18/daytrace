@@ -25,6 +25,28 @@ interface ImportedQuestionFormat {
   [key: string]: any;
 }
 
+interface ExportedSessionFormat {
+  exportedAt: string;
+  sessionInfo: {
+    id: string;
+    timestamp: number;
+    title?: string;
+    date: string;
+  };
+  questions: {
+    id: string;
+    question: string;
+    answer: string;
+    status: string;
+  }[];
+  summary: {
+    totalQuestions: number;
+    answered: number;
+    skipped: number;
+    pending: number;
+  };
+}
+
 export default function DaytraceClientPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -40,6 +62,7 @@ export default function DaytraceClientPage() {
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [pauseDuration, setPauseDuration] = useState<number>(3); // STT now starts immediately after TTS, but keeping for voice commands
+  const [isSessionContinuation, setIsSessionContinuation] = useState<{active: boolean, sessionInfo?: any}>({active: false});
 
   const { toast } = useToast();
 
@@ -497,33 +520,93 @@ export default function DaytraceClientPage() {
       reader.onload = (e) => {
         try {
           const content = e.target?.result as string;
-          const parsedInput: ImportedQuestionFormat[] = JSON.parse(content);
-          if (!Array.isArray(parsedInput) || !parsedInput.every(q => typeof q.question === 'string')) {
-            throw new Error("Invalid JSON format. Expected an array of objects with a 'question' property.");
+          const parsedData = JSON.parse(content);
+          
+          let questionsWithIds: Question[] = [];
+          let questionStatesData: AllQuestionStates = {};
+          let sessionInfo: any = null;
+          let isSessionImport = false;
+          
+          // Check if it's an exported session format
+          if (parsedData && typeof parsedData === 'object' && !Array.isArray(parsedData) && 
+              parsedData.sessionInfo && parsedData.questions && Array.isArray(parsedData.questions)) {
+            // Handle exported session format
+            const exportedSession = parsedData as ExportedSessionFormat;
+            isSessionImport = true;
+            sessionInfo = exportedSession.sessionInfo;
+            
+            questionsWithIds = exportedSession.questions.map((q, index) => ({
+              text: q.question,
+              id: q.id || `q-${Date.now()}-${index}`,
+              context: undefined
+            }));
+            
+            // Restore previous answers and states
+            questionStatesData = {};
+            exportedSession.questions.forEach(q => {
+              questionStatesData[q.id] = {
+                answer: q.answer || '',
+                status: (q.status as any) || 'pending'
+              };
+            });
+            
+            setIsSessionContinuation({
+              active: true,
+              sessionInfo: {
+                ...sessionInfo,
+                originalDate: sessionInfo.date,
+                questionCount: exportedSession.questions.length,
+                previouslyAnswered: exportedSession.summary?.answered || 0
+              }
+            });
+            
+          } else if (Array.isArray(parsedData)) {
+            // Handle simple question array format
+            const parsedInput: ImportedQuestionFormat[] = parsedData;
+            if (!parsedInput.every(q => typeof q.question === 'string')) {
+              throw new Error("Invalid JSON format. Expected an array of objects with a 'question' property.");
+            }
+            
+            questionsWithIds = parsedInput.map((q, index) => {
+              const { question, id, ...context } = q;
+              return {
+                text: question,
+                id: id || `q-${Date.now()}-${index}`,
+                context: Object.keys(context).length > 0 ? context : undefined
+              };
+            });
+            
+            setIsSessionContinuation({active: false});
+            
+          } else {
+            throw new Error("Invalid JSON format. Expected either an array of questions or an exported session object.");
           }
-          const questionsWithIds: Question[] = parsedInput.map((q, index) => {
-            const { question, id, ...context } = q;
-            return {
-              text: question,
-              id: id || `q-${Date.now()}-${index}`,
-              context: Object.keys(context).length > 0 ? context : undefined
-            };
-          });
+          
           setQuestions(questionsWithIds);
           setCurrentQuestionIndex(0);
-          initQuestionStates(questionsWithIds);
+          
+          if (Object.keys(questionStatesData).length > 0) {
+            setQuestionStates(questionStatesData);
+          } else {
+            initQuestionStates(questionsWithIds);
+          }
+          
           setIsQnAActive(false);
           
           // Create new session when importing questions
           const sessionId = SessionStorage.saveCurrentSession(
             questionsWithIds,
-            {},
+            questionStatesData,
             0,
             false
           );
           setCurrentSessionId(sessionId);
           
-          toast({ title: "Success", description: "Questions imported successfully." });
+          const message = isSessionImport 
+            ? `Session continued from ${sessionInfo?.date || 'previous session'} with ${questionsWithIds.length} questions.`
+            : "Questions imported successfully.";
+          
+          toast({ title: "Success", description: message });
         } catch (error) {
           console.error("Failed to parse JSON:", error);
           toast({ title: "Error", description: `Failed to import JSON. ${error instanceof Error ? error.message : 'Unknown error.'}`, variant: "destructive" });
@@ -716,6 +799,24 @@ export default function DaytraceClientPage() {
                     onExport={handleExportJson}
                     isExportDisabled={questions.length === 0}
                 />
+                
+                {isSessionContinuation.active && (
+                    <Card className="mt-4 border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950">
+                        <CardContent className="p-4">
+                            <div className="flex items-center gap-2 text-orange-800 dark:text-orange-200">
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                </svg>
+                                <span className="font-medium">Session Continuation</span>
+                            </div>
+                            <div className="mt-2 text-sm text-orange-700 dark:text-orange-300">
+                                <p>Continuing from {isSessionContinuation.sessionInfo?.originalDate}</p>
+                                <p>{isSessionContinuation.sessionInfo?.questionCount} questions • {isSessionContinuation.sessionInfo?.previouslyAnswered} previously answered</p>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+                
                  {questions.length > 0 && !isQnAActive && (
                     <Button onClick={handleStartQnA} className="w-full mt-4 bg-primary text-primary-foreground hover:bg-primary/90">
                         Start Q&A

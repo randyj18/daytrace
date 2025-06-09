@@ -1,42 +1,38 @@
-# Daytrace - Offline Speech-to-Text Q&A App
+# Daytrace
 
-A cross-platform application for conducting voice-driven Q&A sessions with offline speech-to-text capabilities using Whisper.cpp.
+**A privacy-first voice Q&A app for personal reflection and interviews**
 
-## Features
+Daytrace helps you conduct voice-driven question and answer sessions with automatic speech-to-text transcription. Perfect for journaling, interviews, research, coaching sessions, or any scenario where you need to capture spoken responses to structured questions.
 
-- 🎤 **Offline Speech Recognition** - Uses Whisper.cpp for completely offline STT with Web Speech API fallback
-- 🗣️ **Voice Commands** - Control navigation with "daytrace next", "daytrace previous", etc.
-- 🔊 **Audio Cues** - Audible beep indicates when speech recognition is ready
-- 🌐 **Cross-Platform** - Works on web browsers, iOS, and Android
-- 📱 **Mobile Optimized** - Native mobile app support via Capacitor
-- 🔒 **Privacy-First** - All speech processing happens locally
-- 💾 **Data Export** - Export Q&A sessions as JSON
-- 🎯 **Question Navigation** - Skip, jump, and navigate through question sets
-- 🎛️ **Smart Text Processing** - Voice commands are extracted from responses automatically
+🌐 **Try it live**: [daytrace-an8xqropt-randyj18s-projects.vercel.app](https://daytrace-an8xqropt-randyj18s-projects.vercel.app)
 
-## Quick Start
+## ✨ Key Features
 
-### 1. Install Dependencies
+- 🎤 **Instant Voice Recognition** - Speech starts recording immediately after questions are read
+- 🗣️ **Smart Voice Commands** - Control navigation with "daytrace next", "daytrace skip", etc.
+- 🔔 **Audio Cues** - Pleasant ding sound indicates when speech recognition is ready
+- 🔒 **100% Private** - All data stays on your device, no external servers
+- 💾 **Import/Export** - Upload question sets and export your responses as JSON
+- 🎯 **Flexible Navigation** - Skip questions, jump around, or review previous answers
+- 📱 **Mobile Friendly** - Works on all devices with microphone access
+- 🌍 **Browser Based** - No downloads required, works in any modern browser
+
+## 🚀 How to Use
+
+### For Users (No Setup Required)
+
+1. **Visit the app**: [daytrace-an8xqropt-randyj18s-projects.vercel.app](https://daytrace-an8xqropt-randyj18s-projects.vercel.app)
+2. **Allow microphone access** when prompted by your browser
+3. **Import questions** - Upload a JSON file or use the sample questions
+4. **Start your Q&A session** and begin speaking!
+
+### For Developers
 
 ```bash
+# Install dependencies
 npm install
-```
 
-### 2. Setup Whisper.cpp
-
-Download the required Whisper.cpp files and model:
-
-```bash
-npm run setup-whisper
-```
-
-This downloads:
-- `whisper.js` and `whisper.wasm` (Whisper.cpp WebAssembly)
-- `ggml-base.en.bin` (English speech recognition model ~140MB)
-
-### 3. Run Development Server
-
-```bash
+# Run development server
 npm run dev
 ```
 
@@ -70,33 +66,39 @@ npm run build:mobile
 npm run android
 ```
 
-## Usage
+## 📝 Question Format
 
-1. **Import Questions**: Upload a JSON file with questions in this format:
-   ```json
-   [
-     { "question": "What is your biggest accomplishment this year?" },
-     { "question": "What challenges did you face?" }
-   ]
-   ```
+Create questions in simple JSON format:
 
-2. **Start Q&A**: Click "Start Q&A" to begin the session
+```json
+[
+  { 
+    "question": "What is your biggest accomplishment this year?",
+    "category": "reflection",
+    "context": "Think about both professional and personal achievements"
+  },
+  { 
+    "question": "What challenges did you face?",
+    "category": "growth"
+  }
+]
+```
 
-3. **Voice Interaction**: 
-   - Questions are read aloud automatically
-   - Configurable pause between question and recording (default 3 seconds)
-   - Listen for the "beep" sound indicating speech recognition is ready
-   - Speak your answer - it will be transcribed automatically
-   - Use voice commands during recording: "daytrace next", "daytrace previous", "daytrace skip", "daytrace repeat", "daytrace clear answer", "daytrace set wait to X"
-   - Voice commands also work with "day trace" or "they trace" variations
+The `question` field is required. Additional fields like `category`, `context`, `notes`, etc. are preserved and included in exports.
 
-4. **Navigation**: Use voice commands or control buttons to move between questions, skip, or jump to specific questions
+## 🎙️ How It Works
 
-5. **Export**: Save your completed Q&A session as JSON
+1. **Import** your questions via JSON upload
+2. **Click "Start Q&A"** to begin the session
+3. **Listen** as each question is read aloud
+4. **Wait for the ding** - this means speech recognition is ready
+5. **Speak your answer** - transcription happens automatically
+6. **Use voice commands** to navigate: "daytrace next", "daytrace skip", etc.
+7. **Export** your completed session as JSON with all responses
 
-## Voice Commands
+## 🗣️ Voice Commands
 
-All voice commands work with three variations: "daytrace", "day trace", or "they trace" (in case speech recognition mishears).
+All voice commands work with three variations: "daytrace", "day trace", or "they trace" (helps with speech recognition accuracy).
 
 | Command | Action | Example |
 |---------|--------|---------|
@@ -106,93 +108,75 @@ All voice commands work with three variations: "daytrace", "day trace", or "they
 | `daytrace repeat` | Repeat current question | "Daytrace repeat." |
 | `daytrace clear answer` | Clear current answer | "That was wrong. Daytrace clear answer." |
 | `daytrace summary` | Show progress summary | "Daytrace summary." |
-| `daytrace set wait to X` | Set pause duration | "Daytrace set wait to 10." |
 
-Commands are automatically removed from your answer text, so you can say them naturally within your response.
+**Pro tip**: Commands are automatically removed from your answer text, so you can say them naturally within your response!
 
-## Pause Settings
+## 🔧 Privacy & Data
 
-Control the thinking time between question and recording:
+- **Local Storage Only**: All your Q&A data stays on your device
+- **No Tracking**: Zero analytics, cookies, or data collection
+- **No Sign-up**: Use immediately without accounts or registration
+- **Offline Capable**: Core features work without internet connection
+- **Open Source**: Full source code available for transparency
 
-- **Default**: 3 seconds pause after question reading
-- **Range**: 0-60 seconds
-- **UI Control**: Use the "Wait Time" input in the Controls section
-- **Voice Control**: Say "daytrace set wait to X" (where X is seconds)
-- **Persistence**: Setting is saved in browser localStorage
+## 🏗️ Use Cases
 
-Example scenarios:
-- Set to 0 for rapid-fire Q&A sessions
-- Set to 10+ for complex questions requiring thought
-- Adjust mid-session via voice commands without interrupting flow
+- **Personal Journaling**: Daily reflection questions and thought recording
+- **Research Interviews**: Conduct and transcribe qualitative interviews
+- **Coaching Sessions**: Structured self-coaching or client sessions  
+- **Team Retrospectives**: Capture spoken feedback in meetings
+- **Content Creation**: Interview preparation and content research
+- **Language Practice**: Speaking practice with self-assessment
+- **Accessibility**: Voice-first interface for those who prefer speaking over typing
 
-## Technical Details
+## 🛠️ For Developers
 
-### Offline Speech Recognition
+Built with modern web technologies:
 
-- **Web**: Uses Whisper.cpp compiled to WebAssembly
-- **Mobile**: Uses the same WASM approach with mobile optimizations
-- **Fallback**: Native speech recognition APIs when available
-- **Model**: ggml-base.en.bin for English (other languages supported)
+- **Next.js 15** - React framework with static export
+- **TypeScript** - Type-safe development
+- **Tailwind CSS** - Utility-first styling
+- **Web Speech API** - Browser-native speech recognition
+- **Web Audio API** - Custom audio cues and processing
+- **LocalStorage** - Client-side data persistence
 
-### Architecture
+### Development Scripts
 
+```bash
+npm run dev          # Development server (localhost:9002)
+npm run build        # Build for production
+npm run typecheck    # TypeScript checking
+npm run lint         # Code linting
 ```
-src/
-├── lib/
-│   ├── whisper.ts          # Main Whisper.cpp integration
-│   └── whisper-mobile.ts   # Mobile-specific optimizations
-├── components/
-│   ├── AudioControls.tsx   # Speech controls
-│   └── DaytraceClientPage.tsx # Main app logic
-└── app/                    # Next.js app structure
+
+### Mobile Development (Optional)
+
+```bash
+npm run build:mobile # Build and sync for mobile
+npm run add:ios      # Add iOS platform
+npm run add:android  # Add Android platform
+npm run ios         # Open in Xcode
+npm run android     # Open in Android Studio
 ```
 
-### Cross-Platform Strategy
+## 🤝 Contributing
 
-- **Web**: Next.js static export with Whisper.cpp WASM
-- **Mobile**: Capacitor wraps the web app for native deployment
-- **Offline**: All processing happens client-side, no internet required
-
-## Development
-
-### Scripts
-
-- `npm run dev` - Development server
-- `npm run build` - Build for web
-- `npm run build:mobile` - Build and sync for mobile
-- `npm run setup-whisper` - Download Whisper.cpp files
-- `npm run typecheck` - TypeScript checking
-- `npm run lint` - Code linting
-
-### File Structure
-
-- `public/` - Static assets including Whisper.cpp files
-- `src/lib/whisper.ts` - Core speech recognition logic
-- `src/components/` - React components
-- `capacitor.config.ts` - Mobile app configuration
-
-## Performance Notes
-
-- First load may take a moment to initialize Whisper.cpp (~140MB model)
-- Speech recognition quality depends on microphone and environment
-- Mobile apps have same performance as web due to WASM
-
-## Contributing
+We welcome contributions! Please:
 
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Test on web and mobile platforms
-5. Submit a pull request
+3. Test your changes thoroughly
+4. Submit a pull request
 
-## License
+## 📄 License
 
 MIT License - see LICENSE file for details
 
-## Support
+## 🐛 Issues & Support
 
-For issues and support: [GitHub Issues](https://github.com/your-repo/issues)
+Found a bug or have a feature request? 
+[Open an issue on GitHub](https://github.com/randyj18/daytrace/issues)
 
 ---
 
-Built with ❤️ for privacy-conscious voice applications
+**Built with ❤️ for privacy-conscious voice applications**
