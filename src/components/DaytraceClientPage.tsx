@@ -1210,6 +1210,17 @@ export default function DaytraceClientPage() {
             Support development ☕
           </a>
         </p>
+        <p className="text-xs">
+          Built with{' '}
+          <a
+            href="https://claude.ai/code"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            Claude Code
+          </a>
+        </p>
       </footer>
     </div>
   );

@@ -171,6 +171,10 @@ We welcome contributions! Please:
 3. Test your changes thoroughly
 4. Submit a pull request
 
+## 🙏 Acknowledgments
+
+This application was developed with assistance from Claude (Anthropic's AI assistant) through [Claude Code](https://claude.ai/code) for architecture design, implementation, and optimization.
+
 ## 📄 License
 
 MIT License - see LICENSE file for details
