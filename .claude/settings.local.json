@@ -22,7 +22,8 @@
       "Bash(npm run lint)",
       "Bash(sed:*)",
       "Bash(node:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(npm audit:*)"
     ],
     "deny": []
   }
