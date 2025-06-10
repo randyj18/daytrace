@@ -455,6 +455,7 @@ export default function DaytraceClientPage() {
     // Capture current question info at start of transcription
     const questionAtStart = currentQuestion;
     const questionIndexAtStart = currentQuestionIndex;
+    let transcribedText = '';
 
     try {
       setIsTranscribing(true);
@@ -462,13 +463,14 @@ export default function DaytraceClientPage() {
       console.log('[STT] Starting speech recognition');
       toast({ title: "Listening...", description: "Speak now. Recognition will stop automatically when you finish." });
       
-      const transcribedText = await speechRecognitionRef.current.startListening();
+      transcribedText = await speechRecognitionRef.current.startListening();
+      console.log('[STT] Received transcript:', transcribedText.length, 'characters');
       
       console.log('[STT] Speech recognition completed, processing results');
       console.log('[STT] Transcribed text length:', transcribedText.length, 'Content:', transcribedText);
       console.log(`[STATE TRANSITION] STT ended. Current state: ${getCurrentState()}`);
       
-      if (transcribedText.trim() && questionAtStart) {
+      if (transcribedText && transcribedText.trim() && questionAtStart) {
         console.log('[STT] Raw transcribed text:', transcribedText);
         console.log('[STT] Question at start:', questionAtStart.id);
         
@@ -504,41 +506,46 @@ export default function DaytraceClientPage() {
           const action = currentAnswer.trim() === '' ? 'Set' : 'Added';
           toast({ title: "Transcription", description: `${action}: "${cleanedText}"` });
           
-          // Smart auto-navigation after answering
-          if (!commandExecuted) {
+          // Auto-navigation after answering - but prevent if already navigating
+          if (!commandExecuted && !navigationTimeoutRef.current) {
             const wasBlankQuestion = currentAnswer.trim() === '';
             const currentIndex = questions.findIndex(q => q.id === questionAtStart.id);
             
             console.log('[AUTO-NAV] Planning auto-navigation:', { wasBlankQuestion, currentIndex });
             
             setTimeout(() => {
-              if (wasBlankQuestion) {
-                // Completing mode: jump to next blank question after current
-                const nextBlankIndex = questions.findIndex((q, idx) => {
-                  if (idx <= currentIndex) return false;
-                  return isQuestionUnanswered(q.id);
-                });
-                
-                if (nextBlankIndex >= 0) {
-                  console.log(`[AUTO-NAV] Completing mode: jumping to next blank question ${nextBlankIndex + 1}`);
-                  navigate('jump', nextBlankIndex);
-                  toast({ title: "Auto-navigation", description: `Moved to next unanswered question ${nextBlankIndex + 1}` });
+              // Double-check we're still in the same question context
+              if (currentQuestion?.id === questionAtStart.id) {
+                if (wasBlankQuestion) {
+                  // Completing mode: jump to next blank question after current
+                  const nextBlankIndex = questions.findIndex((q, idx) => {
+                    if (idx <= currentIndex) return false;
+                    return isQuestionUnanswered(q.id);
+                  });
+                  
+                  if (nextBlankIndex >= 0) {
+                    console.log(`[AUTO-NAV] Completing mode: jumping to next blank question ${nextBlankIndex + 1}`);
+                    navigate('jump', nextBlankIndex);
+                    toast({ title: "Auto-navigation", description: `Moved to next unanswered question ${nextBlankIndex + 1}` });
+                  } else {
+                    console.log('[AUTO-NAV] Completing mode: all questions answered');
+                    toast({ title: "Complete", description: "All questions have been answered!" });
+                  }
                 } else {
-                  console.log('[AUTO-NAV] Completing mode: all questions answered');
-                  toast({ title: "Complete", description: "All questions have been answered!" });
+                  // Reviewing mode: go to next sequential question
+                  if (currentIndex < questions.length - 1) {
+                    console.log(`[AUTO-NAV] Reviewing mode: moving to next sequential question ${currentIndex + 2}`);
+                    navigate('next');
+                    toast({ title: "Auto-navigation", description: "Moved to next question for review" });
+                  } else {
+                    console.log('[AUTO-NAV] Reviewing mode: reached last question');
+                    toast({ title: "End", description: "Reached the last question" });
+                  }
                 }
               } else {
-                // Reviewing mode: go to next sequential question
-                if (currentIndex < questions.length - 1) {
-                  console.log(`[AUTO-NAV] Reviewing mode: moving to next sequential question ${currentIndex + 2}`);
-                  navigate('next');
-                  toast({ title: "Auto-navigation", description: "Moved to next question for review" });
-                } else {
-                  console.log('[AUTO-NAV] Reviewing mode: reached last question');
-                  toast({ title: "End", description: "Reached the last question" });
-                }
+                console.log('[AUTO-NAV] Question context changed, skipping auto-navigation');
               }
-            }, 1000); // Small delay to let user see the transcription
+            }, 1500); // Longer delay to prevent conflicts
           }
         }
         
@@ -568,20 +575,8 @@ export default function DaytraceClientPage() {
               toast({ title: "Voice Command", description: "Resuming..." });
             }
           }, 100);
-        } else if (!commandExecuted && cleanedText.trim()) {
-          // Auto-advance to next question after a short delay (only if no command was executed AND not on last question)
-          if (questionIndexAtStart < questions.length - 1) {
-            setTimeout(() => {
-              console.log('Auto-advancing from question', questionIndexAtStart + 1, 'to', questionIndexAtStart + 2);
-              navigate('next');
-            }, 1500);
-          } else {
-            // On last question, just show completion message
-            setTimeout(() => {
-              toast({ title: "Complete!", description: "You've finished all questions! Use navigation to review." });
-            }, 1000);
-          }
         }
+        // Old auto-advance logic removed to prevent conflicts
       } else {
         console.log('[STT] No transcribed text received. Details:', {
           transcribedTextLength: transcribedText.length,
@@ -601,31 +596,40 @@ export default function DaytraceClientPage() {
       console.log('[STT] Transcription session ended');
       setIsTranscribing(false);
       
-      // Set appropriate state based on Q&A status
+      // Set state based on results
       if (isQnAActive) {
-        setAppState('transitioning');
-        // Auto-restart STT if still active and no navigation pending
-        setTimeout(() => {
-          if (isQnAActive && !speechSynthesis?.speaking && !readingQuestionRef.current) {
-            setAppState('stt');
-            if (isSpeechReady && currentQuestion && speechRecognitionRef.current && !isTranscribing) {
+        if (transcribedText && transcribedText.trim()) {
+          console.log('[STT] Text received, not auto-restarting');
+          setAppState('transitioning');
+        } else {
+          console.log('[STT] No text received, staying in transitioning state');
+          setAppState('transitioning');
+          // Only auto-restart if explicitly needed and nothing else happening
+          setTimeout(() => {
+            if (isQnAActive && 
+                appStateRef.current === 'transitioning' && 
+                !speechSynthesis?.speaking && 
+                !readingQuestionRef.current &&
+                !navigationTimeoutRef.current) {
               console.log('[STT] Auto-restarting for continuous listening');
               actuallyStartTranscription();
+            } else {
+              console.log('[STT] Skipping auto-restart - conditions not met');
             }
-          }
-        }, 500);
+          }, 2000); // Longer delay to prevent rapid cycling
+        }
       } else {
         setAppState('inactive');
       }
     }
-  };
+  }; // End of actuallyStartTranscription
 
   const readQuestionAndPotentiallyListen = useCallback(async (questionText: string) => {
     console.log('[TTS] readQuestionAndPotentiallyListen called with:', questionText);
     
     // Prevent multiple simultaneous calls
-    if (readingQuestionRef.current) {
-      console.log('[TTS] Already reading a question, ignoring this call');
+    if (readingQuestionRef.current || appStateRef.current === 'tts') {
+      console.log('[TTS] Already reading a question or in TTS state, ignoring this call');
       return;
     }
     
@@ -662,7 +666,7 @@ export default function DaytraceClientPage() {
           playDingSound(() => {
             setAppState('transitioning');
             setTimeout(() => {
-              if (isQnAActive && !readingQuestionRef.current) {
+              if (isQnAActive && !readingQuestionRef.current && appStateRef.current === 'transitioning') {
                 actuallyStartTranscription();
               }
             }, 200);
@@ -722,10 +726,13 @@ export default function DaytraceClientPage() {
   useEffect(() => {
     if (!isQnAActive && appStateRef.current !== 'inactive') {
       console.log('[Q&A STATE] Q&A deactivated, cleaning up state');
-      cleanupCurrentOperation();
-      setAppState('inactive');
+      const cleanup = async () => {
+        await cleanupCurrentOperation();
+        setAppState('inactive');
+      };
+      cleanup();
     }
-  }, [isQnAActive, cleanupCurrentOperation, setAppState]);
+  }, [isQnAActive]); // Remove function dependencies to prevent re-triggering
 
   const handleImportJson = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1063,27 +1070,44 @@ export default function DaytraceClientPage() {
   useEffect(() => {
     if (justStartedQnA && isQnAActive && currentQuestion && questions.length > 0) {
       console.log('Starting Q&A - reading first unanswered question');
-      readQuestionAndPotentiallyListen(currentQuestion.text);
+      const startFirstQuestion = async () => {
+        await cleanupCurrentOperation();
+        if (isQnAActive && currentQuestion) {
+          readQuestionAndPotentiallyListen(currentQuestion.text);
+        }
+      };
+      startFirstQuestion();
       setJustStartedQnA(false); 
     }
-  }, [justStartedQnA, isQnAActive, currentQuestion, questions.length, readQuestionAndPotentiallyListen]);
+  }, [justStartedQnA]); // Minimal dependencies to prevent re-triggering
 
-  // Read question when index changes (for navigation)
+  // Read question when index changes (for navigation) - with debounce
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   useEffect(() => {
     if (isQnAActive && currentQuestion && !justStartedQnA) {
       console.log('Navigation triggered - reading question', currentQuestionIndex + 1);
       
-      // Use the comprehensive cleanup before starting new question
-      const startNewQuestion = async () => {
+      // Clear any pending navigation
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
+      }
+      
+      // Debounce navigation to prevent multiple rapid calls
+      navigationTimeoutRef.current = setTimeout(async () => {
         await cleanupCurrentOperation();
-        if (isQnAActive && currentQuestion) { // Double-check still active after cleanup
+        if (isQnAActive && currentQuestion) {
           readQuestionAndPotentiallyListen(currentQuestion.text);
         }
-      };
-      
-      startNewQuestion();
+      }, 100); // Short debounce
     }
-  }, [currentQuestionIndex, isQnAActive, currentQuestion, justStartedQnA, cleanupCurrentOperation, readQuestionAndPotentiallyListen]);
+    
+    return () => {
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
+      }
+    };
+  }, [currentQuestionIndex, isQnAActive, currentQuestion, justStartedQnA]);
   
   const getProgressSummary = () => {
     const answeredCount = Object.values(questionStates).filter(s => s.status === 'answered').length;
