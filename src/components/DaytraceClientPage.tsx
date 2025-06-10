@@ -445,292 +445,131 @@ export default function DaytraceClientPage() {
   }, [toast, setQuestionStates]);
 
   const actuallyStartTranscription = async () => {
-    console.log('[STT] actuallyStartTranscription called');
+    console.log('[STT] Simple listen and auto-navigate flow');
     
-    if (!isSpeechReady || !speechRecognitionRef.current) {
-      console.log('[STT] Speech recognition not ready');
-      toast({ title: "STT Not Ready", description: "Speech recognition not available.", variant: "destructive" });
+    if (!isSpeechReady || !speechRecognitionRef.current || isTranscribing) {
+      console.log('[STT] Cannot start - not ready or already active');
       return;
     }
     
-    if (isTranscribing || appStateRef.current === 'stt') {
-      console.log('[STT] Already transcribing, ignoring duplicate start request');
+    if (speechSynthesis?.speaking || readingQuestionRef.current) {
+      console.log('[STT] Cannot start - TTS is active');
       return;
     }
 
-    // Ensure speech synthesis is completely stopped
-    if (speechSynthesis && speechSynthesis.speaking) {
-      console.log('[STT] Speech synthesis still active, cancelling and waiting');
-      speechSynthesis.cancel();
-      // Wait briefly for cancellation to complete
-      setTimeout(() => {
-        if (!speechSynthesis?.speaking) {
-          actuallyStartTranscription();
-        }
-      }, 200);
-      return;
-    }
-
-    // Capture current question info at start of transcription
     const questionAtStart = currentQuestion;
-    const questionIndexAtStart = currentQuestionIndex;
-    let transcribedText = '';
+    if (!questionAtStart) return;
 
     try {
       setIsTranscribing(true);
       setAppState('stt');
-      console.log('[STT] Starting speech recognition');
-      toast({ title: "Listening...", description: "Speak now. Recognition will stop automatically when you finish." });
+      toast({ title: "Listening", description: "Speak your answer..." });
       
-      transcribedText = await speechRecognitionRef.current.startListening();
-      console.log('[STT] Received transcript:', transcribedText.length, 'characters');
+      const transcribedText = await speechRecognitionRef.current.startListening();
+      console.log('[STT] Got text:', transcribedText);
       
-      console.log('[STT] Speech recognition completed, processing results');
-      console.log('[STT] Transcribed text length:', transcribedText.length, 'Content:', transcribedText);
-      console.log(`[STATE TRANSITION] STT ended. Current state: ${getCurrentState()}`);
-      
-      if (transcribedText && transcribedText.trim() && questionAtStart) {
-        console.log('[STT] Raw transcribed text:', transcribedText);
-        console.log('[STT] Question at start:', questionAtStart.id);
-        
-        // Process voice commands first
+      if (transcribedText?.trim()) {
+        // Process voice commands
         const result = processVoiceCommands(transcribedText, questionAtStart.id);
         const { cleanedText, commandExecuted, command } = result as any;
-        console.log('Cleaned text after command processing:', cleanedText);
         
         if (cleanedText.trim()) {
-          // Get current answer for the question we started with
-          const currentAnswer = questionStates[questionAtStart.id]?.answer || '';
-          
-          // Check if there's already text - if so, append; if not, replace
-          let newAnswer;
-          if (currentAnswer.trim() === '') {
-            newAnswer = cleanedText; // First input - replace empty answer
-          } else {
-            newAnswer = currentAnswer + ' ' + cleanedText; // Subsequent input - append
-          }
-          
-          console.log('New answer will be:', newAnswer);
-          
-          // Update the specific question we were answering
+          // Save the answer
           setQuestionStates(prev => ({
             ...prev,
             [questionAtStart.id]: {
               ...(prev[questionAtStart.id] || { answer: '', status: 'pending' }),
-              answer: newAnswer.trim(),
+              answer: cleanedText.trim(),
               status: 'answered'
             }
           }));
           
-          const action = currentAnswer.trim() === '' ? 'Set' : 'Added';
-          toast({ title: "Transcription", description: `${action}: "${cleanedText}"` });
+          toast({ title: "Answer Saved", description: `"${cleanedText}"` });
           
-          // Auto-navigation after answering - but prevent if already navigating
-          if (!commandExecuted && !navigationTimeoutRef.current) {
-            const wasBlankQuestion = currentAnswer.trim() === '';
-            const currentIndex = questions.findIndex(q => q.id === questionAtStart.id);
-            
-            console.log('[AUTO-NAV] Planning auto-navigation:', { wasBlankQuestion, currentIndex });
-            
-            setTimeout(() => {
-              // Double-check we're still in the same question context
-              if (currentQuestion?.id === questionAtStart.id) {
-                if (wasBlankQuestion) {
-                  // Completing mode: jump to next blank question after current
-                  const nextBlankIndex = questions.findIndex((q, idx) => {
-                    if (idx <= currentIndex) return false;
-                    return isQuestionUnanswered(q.id);
-                  });
-                  
-                  if (nextBlankIndex >= 0) {
-                    console.log(`[AUTO-NAV] Completing mode: jumping to next blank question ${nextBlankIndex + 1}`);
-                    navigate('jump', nextBlankIndex);
-                    toast({ title: "Auto-navigation", description: `Moved to next unanswered question ${nextBlankIndex + 1}` });
-                  } else {
-                    console.log('[AUTO-NAV] Completing mode: all questions answered');
-                    toast({ title: "Complete", description: "All questions have been answered!" });
-                  }
-                } else {
-                  // Reviewing mode: go to next sequential question
-                  if (currentIndex < questions.length - 1) {
-                    console.log(`[AUTO-NAV] Reviewing mode: moving to next sequential question ${currentIndex + 2}`);
-                    navigate('next');
-                    toast({ title: "Auto-navigation", description: "Moved to next question for review" });
-                  } else {
-                    console.log('[AUTO-NAV] Reviewing mode: reached last question');
-                    toast({ title: "End", description: "Reached the last question" });
-                  }
-                }
-              } else {
-                console.log('[AUTO-NAV] Question context changed, skipping auto-navigation');
-              }
-            }, 1500); // Longer delay to prevent conflicts
+          // Auto-navigate to next question immediately
+          if (!commandExecuted) {
+            console.log('[STT] Auto-navigating to next question');
+            navigate('next');
           }
         }
         
-        // Execute voice commands after saving text
+        // Execute voice commands
         if (commandExecuted && command) {
-          setTimeout(() => {
-            if (command === 'next') {
-              navigate('next');
-              toast({ title: "Voice Command", description: "Moving to next question" });
-            } else if (command === 'prev') {
-              navigate('prev');
-              toast({ title: "Voice Command", description: "Moving to previous question" });
-            } else if (command === 'skip') {
-              navigate('skip');
-              toast({ title: "Voice Command", description: "Skipping question" });
-            } else if (command === 'summary') {
-              handleShowSummary();
-              toast({ title: "Voice Command", description: "Showing summary" });
-            } else if (command === 'repeat') {
-              handleReadAloud();
-              toast({ title: "Voice Command", description: "Repeating question" });
-            } else if (command === 'pause') {
-              handlePause();
-              toast({ title: "Voice Command", description: "Pausing..." });
-            } else if (command === 'resume') {
-              handleResume();
-              toast({ title: "Voice Command", description: "Resuming..." });
-            }
-          }, 100);
+          if (command === 'next') navigate('next');
+          else if (command === 'prev') navigate('prev');
+          else if (command === 'skip') navigate('skip');
+          else if (command === 'summary') handleShowSummary();
+          else if (command === 'repeat') handleReadAloud();
+          else if (command === 'pause') handlePause();
+          else if (command === 'resume') handleResume();
         }
-        // Old auto-advance logic removed to prevent conflicts
       } else {
-        console.log('[STT] No transcribed text received. Details:', {
-          transcribedTextLength: transcribedText.length,
-          transcribedText: `"${transcribedText}"`,
-          questionAtStart: questionAtStart?.id,
-          hasQuestion: !!questionAtStart
-        });
-        
-        if (!questionAtStart) {
-          console.error('[STT] Question was lost during transcription!');
-        }
+        // No text received - restart listening
+        console.log('[STT] No text, restarting listening');
+        setTimeout(() => {
+          if (isQnAActive && !speechSynthesis?.speaking && !readingQuestionRef.current) {
+            actuallyStartTranscription();
+          }
+        }, 1000);
       }
     } catch (error) {
-      console.error("[STT] Error during transcription:", error);
-      toast({ title: "STT Error", description: "Speech recognition failed. Please try again.", variant: "destructive"});
+      console.error('[STT] Error:', error);
+      toast({ title: "STT Error", description: "Speech recognition failed", variant: "destructive" });
     } finally {
-      console.log('[STT] Transcription session ended');
       setIsTranscribing(false);
+      setAppState('transitioning');
+    }
+  };
+
+  const readQuestionAndPotentiallyListen = useCallback(async (questionText: string) => {
+    console.log('[TTS] Simple read and listen flow');
+    
+    if (readingQuestionRef.current) {
+      console.log('[TTS] Already reading, ignoring');
+      return;
+    }
+    
+    // Stop any existing STT
+    if (isTranscribing && speechRecognitionRef.current) {
+      speechRecognitionRef.current.stopListening();
+      setIsTranscribing(false);
+    }
+    
+    readingQuestionRef.current = true;
+    setAppState('tts');
+    
+    if (!speechSynthesis || !questionText) {
+      readingQuestionRef.current = false;
+      setAppState('inactive');
+      return;
+    }
+    
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(questionText);
+    
+    utterance.onend = () => {
+      console.log('[TTS] Finished. Waiting 2 seconds before STT to prevent audio pickup');
+      readingQuestionRef.current = false;
       
-      // Set state based on results and restart if needed
-      if (isQnAActive) {
-        if (transcribedText && transcribedText.trim()) {
-          console.log('[STT] Text received, not auto-restarting');
-          setAppState('transitioning');
-        } else {
-          console.log('[STT] No text received, will auto-restart STT');
-          setAppState('transitioning');
-          // Auto-restart STT to maintain continuous listening
-          setTimeout(() => {
-            if (isQnAActive && 
-                (appStateRef.current === 'transitioning' || appStateRef.current === 'inactive') && 
-                !speechSynthesis?.speaking && 
-                !readingQuestionRef.current) {
-              console.log('[STT] Auto-restarting for continuous listening');
-              actuallyStartTranscription();
-            } else {
-              console.log('[STT] Skipping auto-restart - conditions not met:', {
-                isQnAActive,
-                currentState: appStateRef.current,
-                speechSpeaking: speechSynthesis?.speaking,
-                readingQuestion: readingQuestionRef.current
-              });
-            }
-          }, 1000); // Shorter delay for better responsiveness
-        }
+      if (isQnAActive && isSpeechReady) {
+        // Longer delay to ensure TTS audio doesn't get picked up by STT
+        setTimeout(() => {
+          if (isQnAActive && !readingQuestionRef.current) {
+            actuallyStartTranscription();
+          }
+        }, 2000); // 2 second delay instead of 300ms
       } else {
         setAppState('inactive');
       }
-    }
-  }; // End of actuallyStartTranscription
-
-  const readQuestionAndPotentiallyListen = useCallback(async (questionText: string) => {
-    console.log('[TTS] readQuestionAndPotentiallyListen called with:', questionText);
+    };
     
-    // Prevent multiple simultaneous calls
-    if (readingQuestionRef.current || appStateRef.current === 'tts') {
-      console.log('[TTS] Already reading a question or in TTS state, ignoring this call');
-      return;
-    }
-    
-    // Clean up any existing operations first
-    await cleanupCurrentOperation();
-    
-    readingQuestionRef.current = true;
-    
-    if (!speechSynthesis || !questionText) {
-      console.log('[TTS] No speech synthesis available, starting transcription directly');
+    utterance.onerror = () => {
       readingQuestionRef.current = false;
-      if (isQnAActive && isSpeechReady) {
-        actuallyStartTranscription();
-      }
-      return;
-    }
+      setAppState('inactive');
+    };
     
-    try {
-      setAppState('tts');
-      
-      // Create and configure utterance
-      const utterance = new SpeechSynthesisUtterance(questionText);
-      
-      utterance.onstart = () => {
-        console.log('[TTS] Started reading question');
-      };
-      
-      utterance.onend = () => {
-        console.log('[TTS] Finished reading question');
-        readingQuestionRef.current = false;
-        
-        if (isQnAActive && isSpeechReady) {
-          // Play ding sound then start STT
-          playDingSound(() => {
-            setAppState('transitioning');
-            setTimeout(() => {
-              if (isQnAActive && !readingQuestionRef.current && appStateRef.current === 'transitioning') {
-                actuallyStartTranscription();
-              }
-            }, 200);
-          });
-        } else {
-          setAppState('inactive');
-        }
-      };
-      
-      utterance.onerror = (event) => {
-        console.error('[TTS] Speech synthesis error:', event.error);
-        readingQuestionRef.current = false;
-        
-        if (event.error !== 'interrupted' && event.error !== 'canceled') {
-          toast({ title: "TTS Error", description: "Failed to read question aloud.", variant: "destructive" });
-        }
-        
-        // Set appropriate state
-        if (isQnAActive) {
-          setAppState('transitioning');
-          // Still try to start STT after error
-          setTimeout(() => {
-            if (isQnAActive) {
-              actuallyStartTranscription();
-            }
-          }, 500);
-        } else {
-          setAppState('inactive');
-        }
-      };
-      
-      console.log('[TTS] Starting speech synthesis');
-      speechSynthesis.speak(utterance);
-      
-    } catch (error) {
-      console.error('[TTS] Error in readQuestionAndPotentiallyListen:', error);
-      readingQuestionRef.current = false;
-      setAppState(isQnAActive ? 'transitioning' : 'inactive');
-      toast({ title: "TTS Error", description: "Failed to start speech synthesis.", variant: "destructive" });
-    }
-  }, [isQnAActive, isSpeechReady, cleanupCurrentOperation, setAppState, playDingSound, toast]);
+    speechSynthesis.speak(utterance);
+  }, [isQnAActive, isSpeechReady, isTranscribing, setAppState]);
 
   // Cleanup effect for component unmount
   useEffect(() => {
