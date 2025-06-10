@@ -345,11 +345,11 @@ export default function DaytraceClientPage() {
       //   }
       // },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+previous\s+question\b/gi, /\b(daytrace|day trace|they trace)\s+previous\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+previous\s+question\b/gi, /\b(daytrace|day trace|they trace|hey trace|retrace)\s+previous\b/gi],
         command: 'prev'
       },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+clear\s+answer\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+clear\s+answer\b/gi],
         command: 'clear',
         execute: () => {
           setQuestionStates(prev => ({
@@ -364,27 +364,27 @@ export default function DaytraceClientPage() {
         }
       },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+next\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+next\s+question\b/gi, /\b(daytrace|day trace|they trace|hey trace|retrace)\s+next\b/gi],
         command: 'next'
       },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+skip\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+skip\s+question\b/gi, /\b(daytrace|day trace|they trace|hey trace|retrace)\s+skip\b/gi],
         command: 'skip'
       },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+summary\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+summary\b/gi],
         command: 'summary'
       },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+repeat\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+repeat\b/gi],
         command: 'repeat'
       },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+pause\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+pause\b/gi],
         command: 'pause'
       },
       {
-        patterns: [/\b(daytrace|day trace|they trace)\s+resume\b/gi],
+        patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+resume\b/gi],
         command: 'resume'
       }
     ];
@@ -437,12 +437,15 @@ export default function DaytraceClientPage() {
         const { cleanedText, commandExecuted, command } = result as any;
         
         if (cleanedText.trim()) {
-          // Save the answer
+          // Save the answer (append if already has answer)
+          const currentAnswer = questionStates[questionAtStart.id]?.answer || '';
+          const newAnswer = currentAnswer.trim() === '' ? cleanedText.trim() : currentAnswer + ' ' + cleanedText.trim();
+          
           setQuestionStates(prev => ({
             ...prev,
             [questionAtStart.id]: {
               ...(prev[questionAtStart.id] || { answer: '', status: 'pending' }),
-              answer: cleanedText.trim(),
+              answer: newAnswer,
               status: 'answered'
             }
           }));
@@ -459,14 +462,34 @@ export default function DaytraceClientPage() {
         
         // Execute voice commands
         if (commandExecuted && command) {
-          if (command === 'next') navigate('next');
-          else if (command === 'prev') navigate('prev');
-          else if (command === 'skip') navigate('skip');
-          else if (command === 'summary') handleShowSummary();
-          else if (command === 'repeat') handleReadAloud();
-          else if (command === 'pause') handlePause();
-          else if (command === 'resume') handleResume();
-          return; // Exit early to prevent restart
+          console.log('[STT] Executing voice command:', command);
+          
+          if (command === 'next') {
+            navigate('next');
+          } else if (command === 'prev') {
+            navigate('prev');
+          } else if (command === 'skip') {
+            navigate('skip');
+          } else if (command === 'summary') {
+            handleShowSummary();
+            // After summary, continue listening
+            setTimeout(() => {
+              if (isQnAActive && !speechSynthesis?.speaking && !readingQuestionRef.current) {
+                actuallyStartTranscription();
+              }
+            }, 3000); // Wait 3 seconds for summary speech to finish
+          } else if (command === 'repeat') {
+            handleReadAloud();
+          } else if (command === 'pause') {
+            handlePause();
+          } else if (command === 'resume') {
+            handleResume();
+          }
+          
+          // Exit early for navigation commands, but not for summary/pause/resume
+          if (['next', 'prev', 'skip', 'repeat', 'pause'].includes(command)) {
+            return;
+          }
         }
       }
       
@@ -762,7 +785,7 @@ export default function DaytraceClientPage() {
     }, 100);
   };
 
-  const handlePause = useCallback(async () => {
+  const handlePause = useCallback(() => {
     console.log('[PAUSE] Pause requested from state:', getCurrentState());
     
     if (isPaused || appStateRef.current === 'paused') {
@@ -783,11 +806,15 @@ export default function DaytraceClientPage() {
       });
       setIsPaused(true);
       setAppState('paused');
+      readingQuestionRef.current = false;
       toast({ title: "Paused", description: "Speech paused" });
     } else if (currentState === 'stt' && isTranscribing) {
       // Pause STT - stop listening
       console.log('[PAUSE] Pausing STT');
-      stopTranscription();
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stopListening();
+        setIsTranscribing(false);
+      }
       setPausedContent({
         type: 'stt',
         content: '',
@@ -800,7 +827,7 @@ export default function DaytraceClientPage() {
       console.log('[PAUSE] No active operation to pause in state:', currentState);
       toast({ title: "Nothing to pause", description: "No active speech or recording" });
     }
-  }, [isPaused, getCurrentState, currentQuestion, isTranscribing, stopTranscription, setAppState, toast]);
+  }, [isPaused, getCurrentState, currentQuestion, isTranscribing, setAppState, toast]);
 
   const handleResume = useCallback(() => {
     console.log('[RESUME] Resume requested from state:', getCurrentState());
@@ -811,21 +838,20 @@ export default function DaytraceClientPage() {
       return;
     }
 
-    if (pausedContent.type === 'tts') {
+    const contentToResume = pausedContent;
+    setPausedContent(null);
+    setIsPaused(false);
+
+    if (contentToResume.type === 'tts') {
       console.log('[RESUME] Resuming TTS');
-      // Resume TTS from the beginning (since we can't resume mid-speech)
-      setPausedContent(null);
-      setIsPaused(false);
       setAppState('transitioning');
       setTimeout(() => {
-        readQuestionAndPotentiallyListen(pausedContent.content);
+        readQuestionAndPotentiallyListen(contentToResume.content);
       }, 100);
-    } else if (pausedContent.type === 'stt') {
+    } else if (contentToResume.type === 'stt') {
       console.log('[RESUME] Resuming STT');
       
       if (isSpeechReady && speechRecognitionRef.current) {
-        setPausedContent(null);
-        setIsPaused(false);
         setAppState('transitioning');
         setTimeout(() => {
           actuallyStartTranscription();
@@ -833,6 +859,9 @@ export default function DaytraceClientPage() {
       } else {
         console.log('[RESUME] Cannot resume STT - not ready');
         toast({ title: "Resume Error", description: "Speech recognition not available", variant: "destructive" });
+        // Reset pause state if we can't resume
+        setIsPaused(true);
+        setPausedContent(contentToResume);
         return;
       }
     }
