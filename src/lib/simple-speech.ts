@@ -114,11 +114,10 @@ export class SimpleSpeechRecognition {
         
         // Handle common errors more gracefully
         if (event.error === 'no-speech' || event.error === 'aborted') {
-          // For auto-restart scenarios, don't resolve yet - let onend handle it
-          if (!this.autoRestart) {
-            resolve(finalTranscript.trim()); // Return whatever we have
-          }
+          console.log('[STT] Recoverable error:', event.error);
+          // Don't reject for common errors, let onend handle it
         } else {
+          console.log('[STT] Serious error:', event.error);
           this.autoRestart = false; // Reset auto-restart flag on real errors
           reject(new Error(`Speech recognition error: ${event.error}`));
         }

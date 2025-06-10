@@ -116,18 +116,30 @@ export default function DaytraceClientPage() {
     return result;
   }, [questions, isQuestionUnanswered, questionStates]);
 
-  // State monitoring for debugging (no false alarms)
+  // State monitoring and recovery
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
-    const logState = () => {
+    const monitorAndRecover = () => {
       const state = getCurrentState();
       console.log(`[STATE] Current: ${state}, Q&A: ${isQnAActive}, Question: ${currentQuestionIndex + 1}`);
+      
+      // Recovery mechanism: if Q&A is active but we're stuck in inactive state
+      if (isQnAActive && state === 'inactive' && !speechSynthesis?.speaking && !readingQuestionRef.current) {
+        console.log('🔄 [RECOVERY] Q&A active but stuck in inactive state, restarting STT');
+        console.log('[RECOVERY] Recovery conditions:', {
+          isQnAActive,
+          state,
+          speechSpeaking: speechSynthesis?.speaking,
+          readingQuestion: readingQuestionRef.current,
+          isTranscribing
+        });
+        actuallyStartTranscription();
+      }
     };
 
-    // Log state changes only, no error checking
     if (isQnAActive) {
-      const interval = setInterval(logState, 5000); // Less frequent logging
+      const interval = setInterval(monitorAndRecover, 3000); // Check every 3 seconds
       return () => clearInterval(interval);
     }
   }, [isQnAActive, getCurrentState, currentQuestionIndex]);
@@ -448,8 +460,15 @@ export default function DaytraceClientPage() {
 
     // Ensure speech synthesis is completely stopped
     if (speechSynthesis && speechSynthesis.speaking) {
-      console.log('[STT] Speech synthesis still active, waiting for completion');
-      return; // Don't recurse, just exit
+      console.log('[STT] Speech synthesis still active, cancelling and waiting');
+      speechSynthesis.cancel();
+      // Wait briefly for cancellation to complete
+      setTimeout(() => {
+        if (!speechSynthesis?.speaking) {
+          actuallyStartTranscription();
+        }
+      }, 200);
+      return;
     }
 
     // Capture current question info at start of transcription
@@ -596,27 +615,31 @@ export default function DaytraceClientPage() {
       console.log('[STT] Transcription session ended');
       setIsTranscribing(false);
       
-      // Set state based on results
+      // Set state based on results and restart if needed
       if (isQnAActive) {
         if (transcribedText && transcribedText.trim()) {
           console.log('[STT] Text received, not auto-restarting');
           setAppState('transitioning');
         } else {
-          console.log('[STT] No text received, staying in transitioning state');
+          console.log('[STT] No text received, will auto-restart STT');
           setAppState('transitioning');
-          // Only auto-restart if explicitly needed and nothing else happening
+          // Auto-restart STT to maintain continuous listening
           setTimeout(() => {
             if (isQnAActive && 
-                appStateRef.current === 'transitioning' && 
+                (appStateRef.current === 'transitioning' || appStateRef.current === 'inactive') && 
                 !speechSynthesis?.speaking && 
-                !readingQuestionRef.current &&
-                !navigationTimeoutRef.current) {
+                !readingQuestionRef.current) {
               console.log('[STT] Auto-restarting for continuous listening');
               actuallyStartTranscription();
             } else {
-              console.log('[STT] Skipping auto-restart - conditions not met');
+              console.log('[STT] Skipping auto-restart - conditions not met:', {
+                isQnAActive,
+                currentState: appStateRef.current,
+                speechSpeaking: speechSynthesis?.speaking,
+                readingQuestion: readingQuestionRef.current
+              });
             }
-          }, 2000); // Longer delay to prevent rapid cycling
+          }, 1000); // Shorter delay for better responsiveness
         }
       } else {
         setAppState('inactive');
@@ -720,7 +743,7 @@ export default function DaytraceClientPage() {
       }
       readingQuestionRef.current = false;
     };
-  }, [stopTranscription, setAppState]);
+  }, []); // Remove dependencies to prevent triggering during normal operation
   
   // Add effect to handle Q&A state changes
   useEffect(() => {
@@ -1017,10 +1040,14 @@ export default function DaytraceClientPage() {
       stopTranscription();
       setAppState('transitioning');
     } else {
-      console.log('[TOGGLE STT] Starting transcription');
-      // Clean up any ongoing operations first
+      console.log('[TOGGLE STT] Starting transcription manually');
+      // Force start transcription regardless of state
       await cleanupCurrentOperation();
-      await actuallyStartTranscription();
+      if (isSpeechReady && speechRecognitionRef.current) {
+        setAppState('stt');
+        actuallyStartTranscription();
+        toast({ title: "Manual STT", description: "Starting speech recognition manually" });
+      }
     }
   };
 
