@@ -66,14 +66,23 @@ export default function DaytraceClientPage() {
   const [isPaused, setIsPaused] = useState(false);
   const [pausedContent, setPausedContent] = useState<{type: 'tts' | 'stt', content: string, questionId: string} | null>(null);
   
-  // State tracking for debugging - should always be one of: 'tts', 'stt', 'paused', 'inactive'
+  // Proper state machine implementation with immediate access
+  type AppState = 'inactive' | 'tts' | 'stt' | 'paused' | 'transitioning';
+  const appStateRef = useRef<AppState>('inactive');
+  const [appState, setAppStateInternal] = useState<AppState>('inactive');
+  
+  // State setter that updates both ref and React state
+  const setAppState = useCallback((newState: AppState) => {
+    const previousState = appStateRef.current;
+    appStateRef.current = newState;
+    setAppStateInternal(newState);
+    console.log(`[STATE MACHINE] ${previousState} → ${newState}`);
+  }, []);
+  
+  // Get current state immediately (no async delay)
   const getCurrentState = useCallback(() => {
-    if (!isQnAActive) return 'inactive';
-    if (isPaused) return 'paused';
-    if (typeof speechSynthesis !== 'undefined' && speechSynthesis && speechSynthesis.speaking) return 'tts';
-    if (isTranscribing) return 'stt';
-    return 'none'; // This should NEVER happen during active Q&A
-  }, [isQnAActive, isPaused, isTranscribing]);
+    return appStateRef.current;
+  }, []);
 
   const { toast } = useToast();
 
@@ -107,42 +116,21 @@ export default function DaytraceClientPage() {
     return result;
   }, [questions, isQuestionUnanswered, questionStates]);
 
-  // State monitoring - log and alert if we're ever in an invalid state
+  // State monitoring for debugging (no false alarms)
   useEffect(() => {
-    // Only run on client side to avoid SSR issues
     if (typeof window === 'undefined') return;
     
-    const checkState = () => {
-      try {
-        const state = getCurrentState();
-        console.log(`[STATE CHECK] Current state: ${state}, Q&A Active: ${isQnAActive}, Question: ${currentQuestionIndex + 1}`);
-        
-        if (isQnAActive && state === 'none') {
-          console.error('🚨 INVALID STATE: Q&A is active but we are not in TTS, STT, or paused state!');
-          console.error('State details:', {
-            isQnAActive,
-            isPaused,
-            isTranscribing,
-            speechSynthesisSpeaking: typeof speechSynthesis !== 'undefined' ? speechSynthesis?.speaking : 'unavailable',
-            currentQuestion: currentQuestion?.text
-          });
-          toast({ 
-            title: "State Error", 
-            description: "Invalid audio state detected. Check console for details.", 
-            variant: "destructive" 
-          });
-        }
-      } catch (error) {
-        console.error('Error in state check:', error);
-      }
+    const logState = () => {
+      const state = getCurrentState();
+      console.log(`[STATE] Current: ${state}, Q&A: ${isQnAActive}, Question: ${currentQuestionIndex + 1}`);
     };
 
-    // Check state every 2 seconds during active Q&A
+    // Log state changes only, no error checking
     if (isQnAActive) {
-      const interval = setInterval(checkState, 2000);
+      const interval = setInterval(logState, 5000); // Less frequent logging
       return () => clearInterval(interval);
     }
-  }, [isQnAActive, getCurrentState, currentQuestionIndex, currentQuestion, toast, isPaused, isTranscribing]);
+  }, [isQnAActive, getCurrentState, currentQuestionIndex]);
   const currentQuestionState = currentQuestion ? questionStates[currentQuestion.id] : undefined;
 
   // Function to play a ding sound using Web Audio API
@@ -267,20 +255,53 @@ export default function DaytraceClientPage() {
     if (isTranscribing && speechRecognitionRef.current) {
       speechRecognitionRef.current.stopListening();
       setIsTranscribing(false);
+      if (appStateRef.current === 'stt') {
+        setAppState('transitioning');
+      }
     }
-  }, [isTranscribing]);
+  }, [isTranscribing, setAppState]);
 
-  const navigate = useCallback((direction: 'next' | 'prev' | 'skip' | 'jump', targetIndex?: number) => {
+  // Comprehensive cleanup function
+  const cleanupCurrentOperation = useCallback(async () => {
+    console.log('[CLEANUP] Starting cleanup of current operations');
+    const currentState = getCurrentState();
+    
+    // Cancel speech synthesis
+    if (speechSynthesis && speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+      console.log('[CLEANUP] Cancelled speech synthesis');
+    }
+    
+    // Stop transcription
+    if (isTranscribing && speechRecognitionRef.current) {
+      speechRecognitionRef.current.stopListening();
+      setIsTranscribing(false);
+      console.log('[CLEANUP] Stopped transcription');
+    }
+    
+    // Reset reading flag
+    readingQuestionRef.current = false;
+    
+    // Set to transitioning state
+    if (currentState !== 'inactive') {
+      setAppState('transitioning');
+    }
+    
+    // Wait for operations to complete
+    await new Promise(resolve => setTimeout(resolve, 300));
+    console.log('[CLEANUP] Cleanup completed');
+  }, [isTranscribing, getCurrentState, setAppState]);
+
+  const navigate = useCallback(async (direction: 'next' | 'prev' | 'skip' | 'jump', targetIndex?: number) => {
     console.log(`[NAVIGATION] Navigate ${direction} requested`);
-    console.log(`[STATE TRANSITION] Navigation interrupting state: ${getCurrentState()}`);
     
     if (questions.length === 0 || !isQnAActive) {
       console.log('[NAVIGATION] Cannot navigate - no questions or Q&A inactive');
       return;
     }
 
-    speechSynthesis?.cancel();
-    stopTranscription();
+    // Clean up current operations before navigation
+    await cleanupCurrentOperation();
 
     let newIndex = currentQuestionIndex;
     const oldIndex = currentQuestionIndex;
@@ -322,7 +343,7 @@ export default function DaytraceClientPage() {
     } else if ((direction === 'next' || direction === 'skip') && currentQuestionIndex === questions.length - 1 && oldIndex === currentQuestionIndex) {
        toast({ title: "End of questions", description: "You've reached the last question."});
     }
-  }, [questions, currentQuestionIndex, questionStates, isQnAActive, stopTranscription, toast]);
+  }, [questions, currentQuestionIndex, questionStates, isQnAActive, cleanupCurrentOperation, toast]);
 
   const processVoiceCommands = useCallback((text: string, currentQuestionId: string) => {
     let cleanedText = text;
@@ -401,7 +422,7 @@ export default function DaytraceClientPage() {
           cleanedText = text.replace(pattern, '').trim();
           commandExecuted = true;
           if (execute) {
-            execute(match);
+            execute();
           }
           return { cleanedText, commandExecuted, command };
         }
@@ -413,29 +434,22 @@ export default function DaytraceClientPage() {
 
   const actuallyStartTranscription = async () => {
     console.log('[STT] actuallyStartTranscription called');
-    console.log(`[STATE TRANSITION] Starting STT. Previous state: ${getCurrentState()}`);
     
     if (!isSpeechReady || !speechRecognitionRef.current) {
       console.log('[STT] Speech recognition not ready');
       toast({ title: "STT Not Ready", description: "Speech recognition not available.", variant: "destructive" });
       return;
     }
-    if (isTranscribing) {
+    
+    if (isTranscribing || appStateRef.current === 'stt') {
       console.log('[STT] Already transcribing, ignoring duplicate start request');
       return;
     }
 
-    // Ensure speech synthesis is completely stopped before starting transcription
+    // Ensure speech synthesis is completely stopped
     if (speechSynthesis && speechSynthesis.speaking) {
-      console.log('[STT] Speech synthesis still active, cancelling and waiting');
-      speechSynthesis.cancel();
-      // Wait for speech to stop, then try again once
-      setTimeout(() => {
-        if (!speechSynthesis.speaking && !isTranscribing) {
-          actuallyStartTranscription();
-        }
-      }, 500);
-      return;
+      console.log('[STT] Speech synthesis still active, waiting for completion');
+      return; // Don't recurse, just exit
     }
 
     // Capture current question info at start of transcription
@@ -444,8 +458,8 @@ export default function DaytraceClientPage() {
 
     try {
       setIsTranscribing(true);
+      setAppState('stt');
       console.log('[STT] Starting speech recognition');
-      console.log(`[STATE TRANSITION] STT started. Current state: ${getCurrentState()}`);
       toast({ title: "Listening...", description: "Speak now. Recognition will stop automatically when you finish." });
       
       const transcribedText = await speechRecognitionRef.current.startListening();
@@ -584,33 +598,30 @@ export default function DaytraceClientPage() {
       console.error("[STT] Error during transcription:", error);
       toast({ title: "STT Error", description: "Speech recognition failed. Please try again.", variant: "destructive"});
     } finally {
-      console.log('[STT] Transcription session ended, setting isTranscribing to false');
+      console.log('[STT] Transcription session ended');
       setIsTranscribing(false);
       
-      // Check if we need to restart STT or enter a different state
-      setTimeout(() => {
-        const newState = getCurrentState();
-        console.log(`[STATE CHECK] After STT ended, current state is: ${newState}`);
-        
-        if (isQnAActive && newState === 'none') {
-          console.log('🚨 [STT] Detected invalid state after STT ended - should restart STT or start TTS');
-          // If we're in an invalid state and Q&A is active, restart STT
-          if (isSpeechReady && currentQuestion && speechRecognitionRef.current) {
-            console.log('[STT] Auto-restarting STT due to invalid state');
-            setTimeout(() => {
-              if (speechRecognitionRef.current && !isTranscribing) {
-                speechRecognitionRef.current.startListening().catch(console.error);
-              }
-            }, 500);
+      // Set appropriate state based on Q&A status
+      if (isQnAActive) {
+        setAppState('transitioning');
+        // Auto-restart STT if still active and no navigation pending
+        setTimeout(() => {
+          if (isQnAActive && !speechSynthesis?.speaking && !readingQuestionRef.current) {
+            setAppState('stt');
+            if (isSpeechReady && currentQuestion && speechRecognitionRef.current && !isTranscribing) {
+              console.log('[STT] Auto-restarting for continuous listening');
+              actuallyStartTranscription();
+            }
           }
-        }
-      }, 100); // Small delay to let state settle
+        }, 500);
+      } else {
+        setAppState('inactive');
+      }
     }
   };
 
-  const readQuestionAndPotentiallyListen = useCallback((questionText: string) => {
+  const readQuestionAndPotentiallyListen = useCallback(async (questionText: string) => {
     console.log('[TTS] readQuestionAndPotentiallyListen called with:', questionText);
-    console.log(`[STATE TRANSITION] Starting TTS. Previous state: ${getCurrentState()}`);
     
     // Prevent multiple simultaneous calls
     if (readingQuestionRef.current) {
@@ -618,98 +629,103 @@ export default function DaytraceClientPage() {
       return;
     }
     
-    // Stop any existing transcription first but don't recurse
-    if (isTranscribing) {
-      console.log('[TTS] Stopping existing transcription before reading question');
-      stopTranscription();
-      return; // Exit early, don't recurse
-    }
+    // Clean up any existing operations first
+    await cleanupCurrentOperation();
     
     readingQuestionRef.current = true;
     
     if (!speechSynthesis || !questionText) {
-      console.log('No speech synthesis or question text, starting transcription immediately');
-      if (isQnAActive && isSpeechReady && !isTranscribing && speechRecognitionRef.current) {
-         setTimeout(() => {
-           if (speechRecognitionRef.current && !isTranscribing) {
-             setIsTranscribing(true);
-             speechRecognitionRef.current.startListening()
-               .then((text) => {
-                 console.log('[NO-TTS] Direct transcription result:', text);
-                 setIsTranscribing(false);
-               })
-               .catch((error) => {
-                 console.error('[NO-TTS] Transcription error:', error);
-                 setIsTranscribing(false);
-               });
-           }
-         }, 500);
-      }
+      console.log('[TTS] No speech synthesis available, starting transcription directly');
       readingQuestionRef.current = false;
+      if (isQnAActive && isSpeechReady) {
+        actuallyStartTranscription();
+      }
       return;
     }
     
-    // Cancel any existing speech with extra safety
-    if (speechSynthesis.speaking) {
-      console.log('Cancelling existing speech synthesis');
-      speechSynthesis.cancel();
-    }
-    
-    // Wait longer for speech synthesis to clear before starting
-    setTimeout(() => {
-      // Double-check speech synthesis isn't still speaking
-      if (speechSynthesis.speaking) {
-        console.log('Speech still active, skipping this read attempt');
-        return; // Don't recurse, just skip
-      }
+    try {
+      setAppState('tts');
       
+      // Create and configure utterance
       const utterance = new SpeechSynthesisUtterance(questionText);
       
       utterance.onstart = () => {
         console.log('[TTS] Started reading question');
-        console.log(`[STATE TRANSITION] TTS started. Current state: ${getCurrentState()}`);
       };
       
       utterance.onend = () => {
-        console.log('[TTS] Finished reading question, starting transcription immediately');
-        console.log(`[STATE TRANSITION] TTS ended, transitioning to STT. Current state: ${getCurrentState()}`);
+        console.log('[TTS] Finished reading question');
         readingQuestionRef.current = false;
-        if (isQnAActive && isSpeechReady && !isTranscribing) {
-          // Play audible ding cue immediately, then start STT
+        
+        if (isQnAActive && isSpeechReady) {
+          // Play ding sound then start STT
           playDingSound(() => {
-            setTimeout(() => actuallyStartTranscription(), 200);
+            setAppState('transitioning');
+            setTimeout(() => {
+              if (isQnAActive && !readingQuestionRef.current) {
+                actuallyStartTranscription();
+              }
+            }, 200);
           });
         } else {
-          console.log('[TTS→STT] Cannot start STT:', { isQnAActive, isSpeechReady, isTranscribing });
+          setAppState('inactive');
         }
       };
       
       utterance.onerror = (event) => {
-        console.error("[TTS] Speech synthesis error", event);
-        console.log(`[STATE TRANSITION] TTS error: ${event.error}. Current state: ${getCurrentState()}`);
+        console.error('[TTS] Speech synthesis error:', event.error);
         readingQuestionRef.current = false;
-        // Only show error toast for non-interrupted errors
+        
         if (event.error !== 'interrupted' && event.error !== 'canceled') {
-          toast({ title: "Error", description: "Failed to read question aloud.", variant: "destructive" });
+          toast({ title: "TTS Error", description: "Failed to read question aloud.", variant: "destructive" });
         }
-        // For interrupted/canceled speech, don't auto-start STT to avoid stuck state
-        // User can manually start recording if needed
-        console.log('[TTS] Speech was interrupted/canceled, not auto-starting STT');
+        
+        // Set appropriate state
+        if (isQnAActive) {
+          setAppState('transitioning');
+          // Still try to start STT after error
+          setTimeout(() => {
+            if (isQnAActive) {
+              actuallyStartTranscription();
+            }
+          }, 500);
+        } else {
+          setAppState('inactive');
+        }
       };
       
-      console.log('[TTS] Starting to speak question');
+      console.log('[TTS] Starting speech synthesis');
       speechSynthesis.speak(utterance);
-    }, 200);
-  }, [isQnAActive, isSpeechReady, isTranscribing, stopTranscription, toast, pauseDuration, getCurrentState, playDingSound]);
+      
+    } catch (error) {
+      console.error('[TTS] Error in readQuestionAndPotentiallyListen:', error);
+      readingQuestionRef.current = false;
+      setAppState(isQnAActive ? 'transitioning' : 'inactive');
+      toast({ title: "TTS Error", description: "Failed to start speech synthesis.", variant: "destructive" });
+    }
+  }, [isQnAActive, isSpeechReady, cleanupCurrentOperation, setAppState, playDingSound, toast]);
 
+  // Cleanup effect for component unmount
   useEffect(() => {
     return () => {
+      console.log('[CLEANUP] Component unmounting, cleaning up');
+      setAppState('inactive');
       stopTranscription();
       if (speechSynthesis) {
         speechSynthesis.cancel();
       }
+      readingQuestionRef.current = false;
     };
-  }, [stopTranscription]);
+  }, [stopTranscription, setAppState]);
+  
+  // Add effect to handle Q&A state changes
+  useEffect(() => {
+    if (!isQnAActive && appStateRef.current !== 'inactive') {
+      console.log('[Q&A STATE] Q&A deactivated, cleaning up state');
+      cleanupCurrentOperation();
+      setAppState('inactive');
+    }
+  }, [isQnAActive, cleanupCurrentOperation, setAppState]);
 
   const handleImportJson = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -888,25 +904,30 @@ export default function DaytraceClientPage() {
     navigate('jump', questionNumber - 1);
   }
 
-  const handleReadAloud = () => {
+  const handleReadAloud = async () => {
+    console.log('[READ-aloud] Read aloud requested, current state:', getCurrentState());
+    
     if (!currentQuestion || !isQnAActive) {
       toast({ title: "Info", description: "No question to read or Q&A not active." });
       return;
     }
-    stopTranscription(); 
-    readQuestionAndPotentiallyListen(currentQuestion.text);
+    
+    // Clean up current operations before reading
+    await cleanupCurrentOperation();
+    await readQuestionAndPotentiallyListen(currentQuestion.text);
   };
 
-  const handlePause = useCallback(() => {
-    console.log('[PAUSE] Pause requested');
-    console.log(`[STATE TRANSITION] Pausing from state: ${getCurrentState()}`);
+  const handlePause = useCallback(async () => {
+    console.log('[PAUSE] Pause requested from state:', getCurrentState());
     
-    if (isPaused) {
+    if (isPaused || appStateRef.current === 'paused') {
       console.log('[PAUSE] Already paused, ignoring');
       return;
     }
 
-    if (speechSynthesis && speechSynthesis.speaking) {
+    const currentState = getCurrentState();
+    
+    if (currentState === 'tts' && speechSynthesis && speechSynthesis.speaking) {
       // Pause TTS
       console.log('[PAUSE] Pausing TTS');
       speechSynthesis.cancel();
@@ -916,64 +937,63 @@ export default function DaytraceClientPage() {
         questionId: currentQuestion?.id || ''
       });
       setIsPaused(true);
-      console.log(`[STATE TRANSITION] Paused from TTS. Current state: ${getCurrentState()}`);
+      setAppState('paused');
       toast({ title: "Paused", description: "Speech paused" });
-    } else if (isTranscribing) {
-      // Pause STT - stop listening and save any interim results
+    } else if (currentState === 'stt' && isTranscribing) {
+      // Pause STT - stop listening
       console.log('[PAUSE] Pausing STT');
       stopTranscription();
       setPausedContent({
         type: 'stt',
-        content: '', // We'll handle partial transcription in the speech recognition
+        content: '',
         questionId: currentQuestion?.id || ''
       });
       setIsPaused(true);
-      console.log(`[STATE TRANSITION] Paused from STT. Current state: ${getCurrentState()}`);
+      setAppState('paused');
       toast({ title: "Paused", description: "Recording paused" });
     } else {
-      console.log('[PAUSE] No active TTS or STT to pause');
+      console.log('[PAUSE] No active operation to pause in state:', currentState);
+      toast({ title: "Nothing to pause", description: "No active speech or recording" });
     }
-  }, [isPaused, getCurrentState, currentQuestion, isTranscribing, stopTranscription, toast]);
+  }, [isPaused, getCurrentState, currentQuestion, isTranscribing, stopTranscription, setAppState, toast]);
 
-  const handleResume = useCallback(() => {
-    console.log('[RESUME] Resume requested');
-    console.log(`[STATE TRANSITION] Resuming from state: ${getCurrentState()}`);
+  const handleResume = useCallback(async () => {
+    console.log('[RESUME] Resume requested from state:', getCurrentState());
     
     if (!isPaused || !pausedContent) {
-      console.log('[RESUME] Not paused or no paused content, ignoring');
+      console.log('[RESUME] Not paused or no paused content');
+      toast({ title: "Nothing to resume", description: "No paused operation found" });
       return;
     }
 
     if (pausedContent.type === 'tts') {
       console.log('[RESUME] Resuming TTS');
       // Resume TTS from the beginning (since we can't resume mid-speech)
-      readQuestionAndPotentiallyListen(pausedContent.content);
+      setPausedContent(null);
+      setIsPaused(false);
+      setAppState('transitioning');
+      await readQuestionAndPotentiallyListen(pausedContent.content);
     } else if (pausedContent.type === 'stt') {
       console.log('[RESUME] Resuming STT');
-      // Resume STT
-      if (isSpeechReady && !isTranscribing && speechRecognitionRef.current) {
-        setIsTranscribing(true);
-        speechRecognitionRef.current.startListening()
-          .then((text) => {
-            console.log('[RESUME] Transcription result:', text);
-            setIsTranscribing(false);
-          })
-          .catch((error) => {
-            console.error('[RESUME] Transcription error:', error);
-            setIsTranscribing(false);
-          });
+      
+      if (isSpeechReady && speechRecognitionRef.current) {
+        setPausedContent(null);
+        setIsPaused(false);
+        setAppState('transitioning');
+        await actuallyStartTranscription();
       } else {
-        console.log('[RESUME] Cannot resume STT:', { isSpeechReady, isTranscribing });
+        console.log('[RESUME] Cannot resume STT - not ready');
+        toast({ title: "Resume Error", description: "Speech recognition not available", variant: "destructive" });
+        return;
       }
     }
 
-    setPausedContent(null);
-    setIsPaused(false);
-    console.log(`[STATE TRANSITION] Resumed. Current state: ${getCurrentState()}`);
     toast({ title: "Resumed", description: "Continuing..." });
-  }, [isPaused, pausedContent, getCurrentState, readQuestionAndPotentiallyListen, isSpeechReady, isTranscribing, toast]);
+  }, [isPaused, pausedContent, readQuestionAndPotentiallyListen, isSpeechReady, setAppState, actuallyStartTranscription, toast]);
 
-  const handleToggleTranscription = () => {
+  const handleToggleTranscription = async () => {
+    console.log('[TOGGLE STT] Toggle requested, current state:', getCurrentState());
+    
     if (!isSpeechReady) {
       toast({ title: "STT Error", description: "Speech recognition not available.", variant: "destructive" });
       return;
@@ -983,21 +1003,17 @@ export default function DaytraceClientPage() {
       return;
     }
 
-    if (isTranscribing) {
+    const currentState = getCurrentState();
+    
+    if (currentState === 'stt' || isTranscribing) {
+      console.log('[TOGGLE STT] Stopping transcription');
       stopTranscription();
+      setAppState('transitioning');
     } else {
-      if (speechRecognitionRef.current && !isTranscribing) {
-        setIsTranscribing(true);
-        speechRecognitionRef.current.startListening()
-          .then((text) => {
-            console.log('[TOGGLE] Transcription result:', text);
-            setIsTranscribing(false);
-          })
-          .catch((error) => {
-            console.error('[TOGGLE] Transcription error:', error);
-            setIsTranscribing(false);
-          });
-      }
+      console.log('[TOGGLE STT] Starting transcription');
+      // Clean up any ongoing operations first
+      await cleanupCurrentOperation();
+      await actuallyStartTranscription();
     }
   };
 
@@ -1006,9 +1022,12 @@ export default function DaytraceClientPage() {
     setSavedSessions(allSessions);
   }, []);
 
-  const handleStartQnA = () => {
+  const handleStartQnA = async () => {
     if (questions.length > 0) {
-      // Find first unanswered question using the same logic as import
+      // Clean up any existing state first
+      await cleanupCurrentOperation();
+      
+      // Find first unanswered question
       const startIndex = findFirstUnansweredIndex();
       const finalStartIndex = startIndex >= 0 ? startIndex : 0;
       const startQuestion = questions[finalStartIndex];
@@ -1026,6 +1045,7 @@ export default function DaytraceClientPage() {
       setCurrentQuestionIndex(finalStartIndex);
       setIsQnAActive(true);
       setJustStartedQnA(true);
+      setAppState('transitioning'); // Will be set to 'tts' when reading starts
       
       // Save Q&A start state
       if (questions.length > 0) {
@@ -1046,23 +1066,24 @@ export default function DaytraceClientPage() {
       readQuestionAndPotentiallyListen(currentQuestion.text);
       setJustStartedQnA(false); 
     }
-  }, [justStartedQnA]);
+  }, [justStartedQnA, isQnAActive, currentQuestion, questions.length, readQuestionAndPotentiallyListen]);
 
-  // Read question when index changes (for navigation) - but not on initial load
+  // Read question when index changes (for navigation)
   useEffect(() => {
     if (isQnAActive && currentQuestion && !justStartedQnA) {
       console.log('Navigation triggered - reading question', currentQuestionIndex + 1);
-      // Ensure any ongoing operations are stopped
-      stopTranscription();
-      if (speechSynthesis) {
-        speechSynthesis.cancel();
-      }
-      // Add a longer delay to ensure clean state transition
-      setTimeout(() => {
-        readQuestionAndPotentiallyListen(currentQuestion.text);
-      }, 500);
+      
+      // Use the comprehensive cleanup before starting new question
+      const startNewQuestion = async () => {
+        await cleanupCurrentOperation();
+        if (isQnAActive && currentQuestion) { // Double-check still active after cleanup
+          readQuestionAndPotentiallyListen(currentQuestion.text);
+        }
+      };
+      
+      startNewQuestion();
     }
-  }, [currentQuestionIndex]);
+  }, [currentQuestionIndex, isQnAActive, currentQuestion, justStartedQnA, cleanupCurrentOperation, readQuestionAndPotentiallyListen]);
   
   const getProgressSummary = () => {
     const answeredCount = Object.values(questionStates).filter(s => s.status === 'answered').length;

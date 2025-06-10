@@ -4,6 +4,7 @@ export class SimpleSpeechRecognition {
   private isListening = false;
   private autoRestart = false;
   private accumulatedTranscript = '';
+  private manualStop = false;
 
   constructor() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -39,38 +40,27 @@ export class SimpleSpeechRecognition {
     }
 
     if (this.isListening) {
-      console.warn('Already listening - stopping previous session and retrying');
+      console.warn('[STT] Already listening, stopping previous session');
       this.stopListening();
-      // Wait longer for the previous session to stop
+      // Wait for previous session to stop
       return new Promise((resolve, reject) => {
         setTimeout(() => {
-          if (!this.isListening) {
-            this.startListening().then(resolve).catch(reject);
-          } else {
-            // Force reset if still listening
-            this.isListening = false;
-            setTimeout(() => {
-              this.startListening().then(resolve).catch(reject);
-            }, 100);
-          }
-        }, 200);
+          this.startListening().then(resolve).catch(reject);
+        }, 300);
       });
     }
 
     return new Promise((resolve, reject) => {
       this.isListening = true;
+      this.manualStop = false;
       
-      // Reset accumulated transcript only if this is not an auto-restart
-      if (!this.autoRestart) {
-        this.accumulatedTranscript = '';
-        console.log('[STT] Starting fresh listening session');
-      } else {
-        console.log('[STT AUTO-RESTART] Continuing session with accumulated transcript:', this.accumulatedTranscript);
-      }
+      // Always start fresh for simplicity
+      this.accumulatedTranscript = '';
+      console.log('[STT] Starting fresh listening session');
       
-      let finalTranscript = this.accumulatedTranscript;
+      let finalTranscript = '';
       let silenceTimer: NodeJS.Timeout;
-      let hasSpoken = this.accumulatedTranscript.length > 0; // If we have accumulated text, user has spoken
+      let hasSpoken = false;
       let stoppedBySilenceTimer = false;
 
       // Auto-stop after 3 seconds of silence once user has spoken
@@ -102,7 +92,6 @@ export class SimpleSpeechRecognition {
           
           if (isFinal) {
             finalTranscript += transcript + ' ';
-            this.accumulatedTranscript = finalTranscript; // Keep track for auto-restart
             hasSpoken = true;
             console.log('[STT] Final transcript updated:', finalTranscript);
           } else {
@@ -149,40 +138,31 @@ export class SimpleSpeechRecognition {
         this.isListening = false;
         if (silenceTimer) clearTimeout(silenceTimer);
         
-        // Auto-restart logic:
-        // 1. If user hasn't spoken yet, this might be initial thinking time - don't auto-restart
-        // 2. If this is already an auto-restart, don't create infinite loops
-        // 3. If we were manually stopped (wasListening = false), don't auto-restart
-        // 4. If recognition ended due to our silence timer, this is normal - don't auto-restart
-        // 5. Otherwise, this is likely a Chrome timeout - auto-restart
-        
-        const shouldAutoRestart = !this.autoRestart && wasListening && !stoppedBySilenceTimer;
+        // Simplified auto-restart logic
+        const shouldAutoRestart = !this.manualStop && wasListening && !stoppedBySilenceTimer && hasSpoken;
         
         console.log('[STT] Auto-restart decision:', {
           shouldAutoRestart,
           reason: shouldAutoRestart ? 'Chrome timeout detected' : 
-                  this.autoRestart ? 'Already auto-restarting' :
-                  !wasListening ? 'Manually stopped' :
-                  stoppedBySilenceTimer ? 'Silence timer' : 'Unknown'
+                  this.manualStop ? 'Manually stopped' :
+                  !wasListening ? 'Not listening' :
+                  stoppedBySilenceTimer ? 'Silence timer' :
+                  !hasSpoken ? 'No speech detected' : 'Unknown'
         });
         
         if (shouldAutoRestart) {
-          console.log('🔄 [STT AUTO-RESTART] Chrome timeout detected, auto-restarting speech recognition to maintain continuous listening');
-          console.log('[STT AUTO-RESTART] Accumulated transcript so far:', this.accumulatedTranscript);
+          console.log('🔄 [STT AUTO-RESTART] Restarting due to Chrome timeout');
           this.autoRestart = true;
           
-          // Auto-restart quickly to avoid missing speech
           setTimeout(() => {
-            if (this.autoRestart) { // Make sure we haven't been manually stopped
-              console.log('[STT AUTO-RESTART] Executing restart...');
+            if (!this.manualStop) {
               this.startListening().then(resolve).catch(reject);
             } else {
-              console.log('[STT AUTO-RESTART] Restart cancelled, was manually stopped');
               resolve(finalTranscript.trim());
             }
-          }, 50); // Very quick restart
+          }, 100);
         } else {
-          this.autoRestart = false; // Reset for next time
+          this.autoRestart = false;
           console.log('[STT] Normal end, returning transcript:', finalTranscript.trim());
           resolve(finalTranscript.trim());
         }
@@ -223,8 +203,9 @@ export class SimpleSpeechRecognition {
   stopListening(): void {
     if (this.recognition && this.isListening) {
       console.log('[STT] Manual stop requested');
-      this.autoRestart = false; // Prevent auto-restart when manually stopped
-      this.accumulatedTranscript = ''; // Reset accumulated transcript
+      this.manualStop = true; // Flag to prevent auto-restart
+      this.autoRestart = false;
+      this.accumulatedTranscript = '';
       
       // Clear any pending timeout
       if (this.recognition._initialTimeout) {
