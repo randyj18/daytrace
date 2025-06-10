@@ -324,26 +324,46 @@ export default function DaytraceClientPage() {
     let cleanedText = text;
     let commandExecuted = false;
 
-    // Check for voice commands (case insensitive)
-    // Support variations: daytrace, day trace, they trace
-    const lowerText = text.toLowerCase();
+    const trimmedText = text.trim().toLowerCase();
     
-    // Define command patterns - check longer phrases first
-    const commandPatterns = [
-      // {
-      //   patterns: [/\b(daytrace|day trace|they trace)\s+set\s+wait\s+to\s+(\d+)\b/gi],
-      //   command: 'set_wait',
-      //   execute: (match: RegExpMatchArray) => {
-      //     const seconds = parseInt(match[2], 10);
-      //     if (seconds >= 0 && seconds <= 60) {
-      //       setPauseDuration(seconds);
-      //       // localStorage.setItem('daytrace_pause_duration', seconds.toString());
-      //       toast({ title: "Voice Command", description: `Wait time set to ${seconds} seconds` });
-      //     } else {
-      //       toast({ title: "Voice Command", description: "Wait time must be between 0 and 60 seconds", variant: "destructive" });
-      //     }
-      //   }
-      // },
+    // Check for standalone commands first (exact matches)
+    const standaloneCommands: Record<string, string> = {
+      'next': 'next',
+      'next question': 'next',
+      'previous': 'prev', 
+      'previous question': 'prev',
+      'skip': 'skip',
+      'skip question': 'skip',
+      'summary': 'summary',
+      'repeat': 'repeat',
+      'repeat question': 'repeat',
+      'pause': 'pause',
+      'resume': 'resume',
+      'clear answer': 'clear'
+    };
+
+    // Check for exact standalone command matches
+    if (standaloneCommands[trimmedText]) {
+      const command = standaloneCommands[trimmedText];
+      console.log(`[VOICE] Standalone command detected: "${trimmedText}" -> ${command}`);
+      
+      if (command === 'clear') {
+        setQuestionStates(prev => ({
+          ...prev,
+          [currentQuestionId]: {
+            ...(prev[currentQuestionId] || { answer: '', status: 'pending' }),
+            answer: '',
+            status: 'pending'
+          }
+        }));
+        toast({ title: "Voice Command", description: "Answer cleared" });
+      }
+      
+      return { cleanedText: '', commandExecuted: true, command };
+    }
+
+    // Check for prefixed commands (legacy support)
+    const prefixedPatterns = [
       {
         patterns: [/\b(daytrace|day trace|they trace|hey trace|retrace)\s+previous\s+question\b/gi, /\b(daytrace|day trace|they trace|hey trace|retrace)\s+previous\b/gi],
         command: 'prev'
@@ -389,13 +409,14 @@ export default function DaytraceClientPage() {
       }
     ];
 
-    // Check each command pattern
-    for (const { patterns, command, execute } of commandPatterns) {
+    // Check prefixed command patterns
+    for (const { patterns, command, execute } of prefixedPatterns) {
       for (const pattern of patterns) {
-        const match = pattern.exec(lowerText);
+        const match = pattern.exec(text);
         if (match) {
           cleanedText = text.replace(pattern, '').trim();
           commandExecuted = true;
+          console.log(`[VOICE] Prefixed command detected: "${match[0]}" -> ${command}`);
           if (execute) {
             execute();
           }
@@ -778,10 +799,12 @@ export default function DaytraceClientPage() {
     }
     readingQuestionRef.current = false;
     
-    // Start reading
+    // Start reading current question
     setAppState('transitioning');
     setTimeout(() => {
-      readQuestionAndPotentiallyListen(currentQuestion.text);
+      if (currentQuestion) {
+        readQuestionAndPotentiallyListen(currentQuestion.text);
+      }
     }, 100);
   };
 
@@ -1079,9 +1102,9 @@ export default function DaytraceClientPage() {
                             <p><strong>1. Import Questions:</strong> Upload a JSON file with your questions</p>
                             <p><strong>2. Start Q&A:</strong> Click "Start Q&A" to begin the session</p>
                             <p><strong>3. Listen & Respond:</strong> Each question will be read aloud, followed by a "beep" indicating you can speak</p>
-                            <p><strong>4. Voice Commands:</strong> Say "daytrace next", "daytrace previous", "daytrace skip", "daytrace repeat", "daytrace clear answer", or "daytrace set wait to X" during recording</p>
+                            <p><strong>4. Voice Commands:</strong> Simply say "next", "previous", "skip", "repeat", "summary", "pause", "resume", or "clear answer" during recording</p>
                             <p><strong>5. Navigation:</strong> Use voice commands or the control buttons to navigate questions</p>
-                            <p className="text-xs mt-3 italic">Note: Voice commands also work with "day trace" or "they trace" if speech recognition mishears the phrase.</p>
+                            <p className="text-xs mt-3 italic">Note: Commands work best when spoken alone. Legacy prefixed commands like "daytrace next" still work for compatibility.</p>
                         </div>
                     </CardContent>
                 </Card>

@@ -9,7 +9,7 @@ Daytrace helps you conduct voice-driven question and answer sessions with automa
 ## ✨ Key Features
 
 - 🎤 **Instant Voice Recognition** - Speech starts recording immediately after questions are read
-- 🗣️ **Smart Voice Commands** - Control navigation with "daytrace next", "daytrace skip", etc.
+- 🗣️ **Smart Voice Commands** - Control navigation with simple commands like "next", "skip", "repeat"
 - 🔔 **Audio Cues** - Pleasant ding sound indicates when speech recognition is ready
 - 🔒 **100% Private** - All data stays on your device, no external servers
 - 💾 **Import/Export** - Upload question sets and export your responses as JSON
@@ -93,23 +93,25 @@ The `question` field is required. Additional fields like `category`, `context`, 
 3. **Listen** as each question is read aloud
 4. **Wait for the ding** - this means speech recognition is ready
 5. **Speak your answer** - transcription happens automatically
-6. **Use voice commands** to navigate: "daytrace next", "daytrace skip", etc.
+6. **Use voice commands** to navigate: simply say "next", "skip", "repeat", etc.
 7. **Export** your completed session as JSON with all responses
 
 ## 🗣️ Voice Commands
 
-All voice commands work with three variations: "daytrace", "day trace", or "they trace" (helps with speech recognition accuracy).
+Voice commands work best when spoken alone. Simply say the command word(s) during recording:
 
 | Command | Action | Example |
 |---------|--------|---------|
-| `daytrace next` | Move to next question | "That's my answer. Daytrace next." |
-| `daytrace previous` | Go to previous question | "Wait, daytrace previous question." |
-| `daytrace skip` | Skip current question | "I don't know. Daytrace skip." |
-| `daytrace repeat` | Repeat current question | "Daytrace repeat." |
-| `daytrace clear answer` | Clear current answer | "That was wrong. Daytrace clear answer." |
-| `daytrace summary` | Show progress summary | "Daytrace summary." |
+| `next` or `next question` | Move to next question | "That's my answer. Next." |
+| `previous` or `previous question` | Go to previous question | "Wait, previous question." |
+| `skip` or `skip question` | Skip current question | "I don't know. Skip." |
+| `repeat` or `repeat question` | Repeat current question | "Repeat." |
+| `clear answer` | Clear current answer | "That was wrong. Clear answer." |
+| `summary` | Show progress summary | "Summary." |
+| `pause` | Pause the session | "Pause." |
+| `resume` | Resume from pause | "Resume." |
 
-**Pro tip**: Commands are automatically removed from your answer text, so you can say them naturally within your response!
+**Advanced**: Legacy prefixed commands like "daytrace next" still work for compatibility, and commands are automatically removed from your answer text.
 
 ## 🔧 Privacy & Data
 
