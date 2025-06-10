@@ -36,7 +36,7 @@ export function VoiceCommandPalette({ onRepeat, onClearAnswer, onJumpToQuestion,
           Controls
         </CardTitle>
         <CardDescription className="text-sm text-muted-foreground">
-          Use these buttons or voice commands during recording. Voice commands: "daytrace next", "daytrace previous", "daytrace skip", "daytrace repeat", "daytrace summary", "daytrace clear answer". Also works with "day trace" or "they trace".
+          Use these buttons or voice commands during recording. Voice commands: "next", "previous", "skip", "repeat", "summary", "clear answer".
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
