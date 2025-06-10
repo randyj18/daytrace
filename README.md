@@ -105,6 +105,7 @@ Voice commands work best when spoken alone. Simply say the command word(s) durin
 | `next` or `next question` | Move to next question | "That's my answer. Next." |
 | `previous` or `previous question` | Go to previous question | "Wait, previous question." |
 | `skip` or `skip question` | Skip current question | "I don't know. Skip." |
+| `jump to #` or `jump to question #` | Jump to specific question | "Jump to 5" or "Jump to question 12" |
 | `repeat` or `repeat question` | Repeat current question | "Repeat." |
 | `clear answer` | Clear current answer | "That was wrong. Clear answer." |
 | `summary` | Show progress summary | "Summary." |

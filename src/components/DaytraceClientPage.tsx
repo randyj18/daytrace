@@ -326,7 +326,15 @@ export default function DaytraceClientPage() {
 
     const trimmedText = text.trim().toLowerCase();
     
-    // Check for standalone commands first (exact matches)
+    // Check for jump commands first (with numbers)
+    const jumpMatch = trimmedText.match(/^(?:jump to question (\d+)|jump to (\d+))$/);
+    if (jumpMatch) {
+      const questionNumber = parseInt(jumpMatch[1] || jumpMatch[2], 10);
+      console.log(`[VOICE] Jump command detected: jump to question ${questionNumber}`);
+      return { cleanedText: '', commandExecuted: true, command: 'jump', targetQuestionNumber: questionNumber };
+    }
+
+    // Check for standalone commands (exact matches)
     const standaloneCommands: Record<string, string> = {
       'next': 'next',
       'next question': 'next',
@@ -484,6 +492,7 @@ export default function DaytraceClientPage() {
         // Execute voice commands
         if (commandExecuted && command) {
           console.log('[STT] Executing voice command:', command);
+          const result = processVoiceCommands(transcribedText, questionAtStart.id);
           
           if (command === 'next') {
             navigate('next');
@@ -491,6 +500,13 @@ export default function DaytraceClientPage() {
             navigate('prev');
           } else if (command === 'skip') {
             navigate('skip');
+          } else if (command === 'jump') {
+            const targetNumber = (result as any).targetQuestionNumber;
+            if (targetNumber && targetNumber >= 1 && targetNumber <= questions.length) {
+              handleJumpToQuestion(targetNumber);
+            } else {
+              toast({ title: "Invalid Jump", description: `Question ${targetNumber} doesn't exist. Valid range: 1-${questions.length}`, variant: "destructive" });
+            }
           } else if (command === 'summary') {
             handleShowSummary();
             // After summary, continue listening
@@ -508,7 +524,7 @@ export default function DaytraceClientPage() {
           }
           
           // Exit early for navigation commands, but not for summary/pause/resume
-          if (['next', 'prev', 'skip', 'repeat', 'pause'].includes(command)) {
+          if (['next', 'prev', 'skip', 'jump', 'repeat', 'pause'].includes(command)) {
             return;
           }
         }
@@ -1102,7 +1118,7 @@ export default function DaytraceClientPage() {
                             <p><strong>1. Import Questions:</strong> Upload a JSON file with your questions</p>
                             <p><strong>2. Start Q&A:</strong> Click "Start Q&A" to begin the session</p>
                             <p><strong>3. Listen & Respond:</strong> Each question will be read aloud, followed by a "beep" indicating you can speak</p>
-                            <p><strong>4. Voice Commands:</strong> Simply say "next", "previous", "skip", "repeat", "summary", "pause", "resume", or "clear answer" during recording</p>
+                            <p><strong>4. Voice Commands:</strong> Simply say "next", "previous", "skip", "jump to #", "repeat", "summary", "pause", "resume", or "clear answer" during recording</p>
                             <p><strong>5. Navigation:</strong> Use voice commands or the control buttons to navigate questions</p>
                             <p className="text-xs mt-3 italic">Note: Commands work best when spoken alone. Legacy prefixed commands like "daytrace next" still work for compatibility.</p>
                         </div>

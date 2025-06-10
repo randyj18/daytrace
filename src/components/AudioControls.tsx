@@ -53,7 +53,7 @@ export function AudioControls({ onReadAloud, onToggleTranscription, onPause, onR
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            <p>{isTranscribing ? 'Stop Transcription (Whisper)' : 'Start Transcription (Whisper)'}</p>
+            <p>{isTranscribing ? 'Stop Transcription' : 'Start Transcription'}</p>
           </TooltipContent>
         </Tooltip>
       </div>
